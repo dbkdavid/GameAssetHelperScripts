@@ -943,8 +943,9 @@ def OnBtnDistribute( isChecked, mode, value ):
 		cmds.confirmDialog( title='ERROR', message=('ERROR: Nothing selected.'), button=['OK'], defaultButton='OK' )
 		return -1
 
-	spacing = value
 	running_total = 0
+	sign = value / abs( value )
+	spacing = value
 	
 	all_children = set()
 
@@ -964,31 +965,43 @@ def OnBtnDistribute( isChecked, mode, value ):
 
 	geo_nodes.sort()
 
-	for obj in geo_nodes:
+	for i in range( len( geo_nodes ) ):
 		
 		# get bounding box
-		bbox = cmds.exactWorldBoundingBox( obj, ii=True )
+		bbox = cmds.exactWorldBoundingBox( geo_nodes[i], ii=True )
 		
 		if( mode == "x" ):
 			width = abs( bbox[3] - bbox[0] )
-			pos = running_total + ( width / 2 )
-			running_total = running_total + width + spacing
+			if i==0:
+				pos = 0
+				running_total = sign * width / 2 + spacing
+			else:
+				pos = running_total + ( sign * width / 2 )
+				running_total = running_total + sign * width + spacing
 			new_trans = [ pos, 0, 0 ]
 			
 		elif( mode == "y" ):
 			width = abs( bbox[4] - bbox[1] )
-			pos = running_total + ( width / 2 )
-			running_total = running_total + width + spacing
+			if i==0:
+				pos = 0
+				running_total = sign * width / 2 + spacing
+			else:
+				pos = running_total + ( sign * width / 2 )
+				running_total = running_total + sign * width + spacing
 			new_trans = [ 0, pos, 0 ]
 			
 		elif( mode == "z" ):
 			width = abs( bbox[5] - bbox[2] )
-			pos = running_total + ( width / 2 )
-			running_total = running_total + width + spacing
+			if i==0:
+				pos = 0
+				running_total = sign * width / 2 + spacing
+			else:
+				pos = running_total + ( sign * width / 2 )
+				running_total = running_total + sign * width + spacing
 			new_trans = [ 0, 0, pos ]
 		
 		# move the object to the new position
-		cmds.xform( obj, t=new_trans, ws=True )
+		cmds.xform( geo_nodes[i], t=new_trans, ws=True )
 
 def OnBtnZeroTranslation( isChecked ):
 
@@ -1449,11 +1462,13 @@ def makeUI():
 	cmds.text( '', height=( win_padding/2 ) )
 	cmds.columnLayout( adjustableColumn=True, columnAttach=('both', win_padding), columnOffset=('both', 0), rowSpacing=0 )
 	# Silder
-	btns_mode = [ 1, 2 ]
+	btns_mode = [ 3, 2 ]
 	cmds.rowLayout( numberOfColumns=btns_mode[0]+2, columnWidth=makeColWidth( btns_mode[0], btns_mode[1] ), columnAlign=col_align, adj=1, columnAttach=makeColAttach( btns_mode[0], btns_mode[1] ) )
 	cmds.text( 'Distribute' )
 	cmds.floatSliderGrp( 'dist_val', field=True, value=50, minValue=0.0, maxValue=100.0, fieldMinValue=-1.0e+06, fieldMaxValue=1.0e+06 )
 	cmds.button( label='X', command='OnBtnDistribute( "True", "x", cmds.floatSliderGrp( "dist_val", q=True, v=True) )', annotation="Distribute the selected objects along the X axis."  )
+	cmds.button( label='Y', command='OnBtnDistribute( "True", "y", cmds.floatSliderGrp( "dist_val", q=True, v=True) )', annotation="Distribute the selected objects along the Y axis."  )
+	cmds.button( label='Z', command='OnBtnDistribute( "True", "z", cmds.floatSliderGrp( "dist_val", q=True, v=True) )', annotation="Distribute the selected objects along the Z axis."  )
 	cmds.setParent( '..' )
 	# Button
 	btns_mode = [ 1, 1 ]
