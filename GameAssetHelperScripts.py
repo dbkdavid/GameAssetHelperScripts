@@ -239,6 +239,16 @@ def multVectorByScalar( scalar, vector ):
 
 	return b
 
+def customRename( obj, name_base, sep, padding, index, first_index, mode ):
+	
+	if mode==1:
+		suffix = str( index + first_index ).rjust( padding, '0' )
+	if mode==2:
+		suffix = chr( ord('@') + index + first_index )
+	
+	new_name = name_base + sep + suffix
+	cmds.rename( obj, new_name )
+
 ################################################################################
 ## Buttons
 ################################################################################
@@ -1212,6 +1222,50 @@ def OnBtnApplyVertColor( isChecked, mode, channel ):
 			#print( result_color )
 			cmds.polyColorPerVertex( verts[i], rgb=result_color, rel=additive, cdo=True )
 
+def OnBtnRenameFromSel( isChecked, name_mode, selection_mode, num_mode, new_name ):
+
+	# get the selected objects
+	sel = cmds.ls( selection=True, long=True )
+	
+	# throw an error if nothing is selected
+	if (not sel):
+		cmds.confirmDialog( title='ERROR', message=('ERROR: Nothing selected.'), button=['OK'], defaultButton='OK' )
+		return -1
+
+	'''
+	name_mode = 1		# 1=selection, 2=string
+	selection_mode = 1	# 1=parent, 2=object
+	num_mode = 1		# 1=numerically, 2=alphabetically
+	'''
+	
+	sep = "_"
+	name_base = new_name
+	padding = 2
+	first_index = 1
+	
+	if selection_mode==1:
+		children_list = list()
+		for grp in sel:
+			name_base = grp.split("|")[-1]
+			children = cmds.listRelatives( grp, ad=True, f=True, type="transform" )		
+			children.sort()
+			for i in range( len( children ) ):
+				customRename( children[i], name_base, sep, padding, i, first_index, num_mode )
+	
+	if selection_mode==2:
+		 
+		if name_mode==2:
+			sel.sort()
+			for i in range( len( sel ) ):
+				customRename( sel[i], name_base, sep, padding, i, first_index, num_mode )
+		 
+		if name_mode==1:
+			name_base = sel[-1].split("|")[-1]
+			sel.pop()
+			sel.sort()
+			for i in range( len( sel ) ):
+				customRename( sel[i], name_base, sep, padding, i, first_index, num_mode )
+
 ################################################################################
 ## User Interface
 ################################################################################
@@ -1429,9 +1483,30 @@ def makeUI():
 	
 	
 	# Frame Begin
-	cmds.frameLayout( label='Object Pivot', collapsable=True, collapse=win_frame_is_collapsed, bv=win_border_vis, mh=win_margin, mw=win_margin )
+	cmds.frameLayout( label='Transforms', collapsable=True, collapse=win_frame_is_collapsed, bv=win_border_vis, mh=win_margin, mw=win_margin )
 	cmds.text( '', height=( win_padding/2 ) )
 	cmds.columnLayout( adjustableColumn=True, columnAttach=('both', win_padding), columnOffset=('both', 0), rowSpacing=0 )
+	# Silder
+	btns_mode = [ 3, 2 ]
+	cmds.rowLayout( numberOfColumns=btns_mode[0]+2, columnWidth=makeColWidth( btns_mode[0], btns_mode[1] ), columnAlign=col_align, adj=1, columnAttach=makeColAttach( btns_mode[0], btns_mode[1] ) )
+	cmds.text( 'Distribute' )
+	cmds.floatSliderGrp( 'dist_val', field=True, value=50, minValue=0.0, maxValue=100.0, fieldMinValue=-1.0e+06, fieldMaxValue=1.0e+06 )
+	cmds.button( label='X', command='OnBtnDistribute( "True", "x", cmds.floatSliderGrp( "dist_val", q=True, v=True) )', annotation="Distribute the selected objects along the X axis."  )
+	cmds.button( label='Y', command='OnBtnDistribute( "True", "y", cmds.floatSliderGrp( "dist_val", q=True, v=True) )', annotation="Distribute the selected objects along the Y axis."  )
+	cmds.button( label='Z', command='OnBtnDistribute( "True", "z", cmds.floatSliderGrp( "dist_val", q=True, v=True) )', annotation="Distribute the selected objects along the Z axis."  )
+	cmds.setParent( '..' )
+	# Button
+	btns_mode = [ 1, 1 ]
+	cmds.rowLayout( numberOfColumns=btns_mode[0]+2, columnWidth=makeColWidth( btns_mode[0], btns_mode[1] ), columnAlign=col_align, adj=1, columnAttach=makeColAttach( btns_mode[0], btns_mode[1] ) )
+	cmds.text( 'Randomize Rotation' )
+	cmds.button( label='Y', command='OnBtnRandRot( "True", "y" )', annotation="Randomize the rotation of the selected objects."  )
+	cmds.setParent( '..' )
+	# Button
+	btns_mode = [ 1, 1 ]
+	cmds.rowLayout( numberOfColumns=btns_mode[0]+2, columnWidth=makeColWidth( btns_mode[0], btns_mode[1] ), columnAlign=col_align, adj=1, columnAttach=makeColAttach( btns_mode[0], btns_mode[1] ) )
+	cmds.text( 'Zero' )
+	cmds.button( label='Translation', command=OnBtnZeroTranslation, annotation="Sets translation to zero on the selected transforms."  )
+	cmds.setParent( '..' )
 	# Buttons
 	btns_mode = [ 2, 1 ]
 	cmds.rowLayout( numberOfColumns=btns_mode[0]+1, adj=1, columnWidth=makeColWidth( btns_mode[0], btns_mode[1] ), columnAlign=col_align, columnAttach=makeColAttach( btns_mode[0], btns_mode[1] ) )
@@ -1458,29 +1533,22 @@ def makeUI():
 	
 	
 	# Frame Begin
-	cmds.frameLayout( label='Transforms', collapsable=True, collapse=win_frame_is_collapsed, bv=win_border_vis, mh=win_margin, mw=win_margin )
+	cmds.frameLayout( label='Rename', collapsable=True, collapse=win_frame_is_collapsed, bv=win_border_vis, mh=win_margin, mw=win_margin )
 	cmds.text( '', height=( win_padding/2 ) )
 	cmds.columnLayout( adjustableColumn=True, columnAttach=('both', win_padding), columnOffset=('both', 0), rowSpacing=0 )
-	# Silder
-	btns_mode = [ 3, 2 ]
+	# Button
+	btns_mode = [ 2, 1 ]
 	cmds.rowLayout( numberOfColumns=btns_mode[0]+2, columnWidth=makeColWidth( btns_mode[0], btns_mode[1] ), columnAlign=col_align, adj=1, columnAttach=makeColAttach( btns_mode[0], btns_mode[1] ) )
-	cmds.text( 'Distribute' )
-	cmds.floatSliderGrp( 'dist_val', field=True, value=50, minValue=0.0, maxValue=100.0, fieldMinValue=-1.0e+06, fieldMaxValue=1.0e+06 )
-	cmds.button( label='X', command='OnBtnDistribute( "True", "x", cmds.floatSliderGrp( "dist_val", q=True, v=True) )', annotation="Distribute the selected objects along the X axis."  )
-	cmds.button( label='Y', command='OnBtnDistribute( "True", "y", cmds.floatSliderGrp( "dist_val", q=True, v=True) )', annotation="Distribute the selected objects along the Y axis."  )
-	cmds.button( label='Z', command='OnBtnDistribute( "True", "z", cmds.floatSliderGrp( "dist_val", q=True, v=True) )', annotation="Distribute the selected objects along the Z axis."  )
+	cmds.text( 'From Group' )
+	cmds.button( label='ABC', command='OnBtnRenameFromSel( True, 1, 1, 2, "" )', annotation="Rename the selected objects alphabetically based on the group name."  )
+	cmds.button( label='123', command='OnBtnRenameFromSel( True, 1, 1, 1, "" )', annotation="Rename the selected objects numerically with a padding of '2' based on the group name."  )
 	cmds.setParent( '..' )
 	# Button
-	btns_mode = [ 1, 1 ]
+	btns_mode = [ 2, 1 ]
 	cmds.rowLayout( numberOfColumns=btns_mode[0]+2, columnWidth=makeColWidth( btns_mode[0], btns_mode[1] ), columnAlign=col_align, adj=1, columnAttach=makeColAttach( btns_mode[0], btns_mode[1] ) )
-	cmds.text( 'Randomize Rotation' )
-	cmds.button( label='Y', command='OnBtnRandRot( "True", "y" )', annotation="Randomize the rotation of the selected objects."  )
-	cmds.setParent( '..' )
-	# Button
-	btns_mode = [ 1, 1 ]
-	cmds.rowLayout( numberOfColumns=btns_mode[0]+2, columnWidth=makeColWidth( btns_mode[0], btns_mode[1] ), columnAlign=col_align, adj=1, columnAttach=makeColAttach( btns_mode[0], btns_mode[1] ) )
-	cmds.text( 'Zero' )
-	cmds.button( label='Translation', command=OnBtnZeroTranslation, annotation="Sets translation to zero on the selected transforms."  )
+	cmds.text( 'From Last Selected' )
+	cmds.button( label='ABC', command='OnBtnRenameFromSel( True, 1, 2, 2, "" )', annotation="Rename the selected objects alphabetically based on the last selected object."  )
+	cmds.button( label='123', command='OnBtnRenameFromSel( True, 1, 2, 1, "" )', annotation="Rename the selected objects numerically with a padding of '2' based on the last selected object."  )
 	cmds.setParent( '..' )
 	# Frame End
 	cmds.text( label='', height=win_padding )
@@ -1495,7 +1563,7 @@ def makeUI():
 	btns_mode = [ 1, 1 ]
 	cmds.rowLayout( numberOfColumns=btns_mode[0]+1, adj=1, columnWidth=makeColWidth( btns_mode[0], btns_mode[1] ), columnAlign=col_align, columnAttach=makeColAttach( btns_mode[0], btns_mode[1] ) )
 	cmds.text( '' )
-	cmds.button( label='Sort Outliner Numerically', command=OnBtnSortOutliner, annotation="Sorts the selected objects in the outliner by number."  )
+	cmds.button( label='Sort Numerically', command=OnBtnSortOutliner, annotation="Sorts the selected objects in the outliner by number."  )
 	cmds.setParent( '..' )
 	# Frame End
 	cmds.text( label='', height=win_padding )
