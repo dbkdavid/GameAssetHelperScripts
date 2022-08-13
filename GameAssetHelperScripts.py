@@ -249,6 +249,116 @@ def customRename( obj, name_base, sep, padding, index, first_index, mode ):
 	new_name = name_base + sep + suffix
 	cmds.rename( obj, new_name )
 
+# Sort Outliner
+
+def getParentChildList( objs ):
+	parent_child_list = list()
+	for obj in objs:
+		parent = cmds.listRelatives( obj, parent=True, fullPath=True )
+		child = cmds.ls( obj, long=True )[0]
+		if parent==None:
+			parent = "root"
+		else:
+			parent = parent[0]
+		parent_child_pair = list()
+		parent_child_pair.append( parent )
+		parent_child_pair.append( child )
+		parent_child_list.append( parent_child_pair )
+	return parent_child_list
+
+def getUniqueParents( objs ):
+	parents_set = set()
+	for obj in objs:
+		parent = cmds.listRelatives( obj, parent=True, fullPath=True )
+		if parent==None:
+			parent = "root"
+		else:
+			parent = parent[0]
+		parents_set.add( parent )
+	unique_parents = list( parents_set )
+	return unique_parents
+
+def groupParentChildren( parent_child_list, unique_parents):
+	grouped_children = list()
+	for p in unique_parents:
+		grouped_children.append( list() )
+	for pair in parent_child_list:
+		for i in range( len( unique_parents ) ):
+			if pair[0] == unique_parents[i]:
+				grouped_children[i].append( pair[1] )
+	return grouped_children
+
+def getAllChildrenFromParents( parents ):
+	all_children = list()
+	for p in parents:
+		all_children.append( list() )
+	for i in range( len( parents ) ):
+		if parents[i]=="root":
+			children = cmds.ls( assemblies=True, long=True )
+		else:
+			children = cmds.listRelatives( parents[i], fullPath=True, children=True )
+		for c in children:
+			all_children[i].append( c )
+	return all_children
+
+def getObjsAboveSelected( unique_parents, sel_children, all_children ):
+	above_selected = list()
+	for p in unique_parents:
+		above_selected.append( list() )
+	for i in range( len( unique_parents ) ):
+		#print( "parent: " + unique_parents[i] )
+		for c in all_children[i]:
+			#print( "all child: " + c )
+			match_found = False
+			for s in sel_children[i]:
+				#print( "comparing: " + s + " and " + c )
+				if c==s:
+					match_found = True
+					break
+			if not match_found:
+				#print( "NOT FOUND" )
+				above_selected[i].append( c )
+			else:
+				break				
+	return above_selected
+
+def getChildTransforms( objs ):
+	child_transforms = list()
+	for obj in objs:
+		children = cmds.listRelatives( obj, fullPath=True, children=True )
+		transforms = cmds.ls( children, long=True, type="transform" )
+		for t in transforms:
+			child_transforms.append( t )
+	return child_transforms
+
+def sortOutliner( objs, recursive ):
+
+	parent_child_list = getParentChildList( objs )	
+	unique_parents = getUniqueParents( objs )
+	grouped_children = groupParentChildren( parent_child_list, unique_parents )
+	all_children = getAllChildrenFromParents( unique_parents )
+	above_selected = getObjsAboveSelected( unique_parents, grouped_children, all_children )
+	
+	for i in range( len( grouped_children ) ):
+		grouped_children[i].sort()
+		grouped_children[i].reverse()
+	
+	for i in range( len( above_selected ) ):
+		above_selected[i].reverse()
+
+	for ls in grouped_children:
+		for child in ls:
+			cmds.reorder( child, front=True )
+
+	for ls in above_selected:
+		for child in ls:
+			cmds.reorder( child, front=True )
+	
+	if recursive:
+		child_transforms = getChildTransforms( objs )
+		if child_transforms:
+			sortOutliner( child_transforms, True )
+
 ################################################################################
 ## Buttons
 ################################################################################
@@ -1266,6 +1376,18 @@ def OnBtnRenameFromSel( isChecked, name_mode, selection_mode, num_mode, new_name
 			for i in range( len( sel ) ):
 				customRename( sel[i], name_base, sep, padding, i, first_index, num_mode )
 
+def OnBtnSortOutliner( isChecked, recursive ):
+
+	# get the selected objects
+	sel = cmds.ls( selection=True, long=True )
+	
+	# throw an error if nothing is selected
+	if (not sel):
+		cmds.confirmDialog( title='ERROR', message=('ERROR: Nothing selected.'), button=['OK'], defaultButton='OK' )
+		return -1
+	
+	sortOutliner( sel, recursive )
+
 ################################################################################
 ## User Interface
 ################################################################################
@@ -1560,10 +1682,11 @@ def makeUI():
 	cmds.text( '', height=( win_padding/2 ) )
 	cmds.columnLayout( adjustableColumn=True, columnAttach=('both', win_padding), columnOffset=('both', 0), rowSpacing=0 )
 	# Buttons
-	btns_mode = [ 1, 1 ]
+	btns_mode = [ 2, 1 ]
 	cmds.rowLayout( numberOfColumns=btns_mode[0]+1, adj=1, columnWidth=makeColWidth( btns_mode[0], btns_mode[1] ), columnAlign=col_align, columnAttach=makeColAttach( btns_mode[0], btns_mode[1] ) )
-	cmds.text( '' )
-	cmds.button( label='Sort Numerically', command=OnBtnSortOutliner, annotation="Sorts the selected objects in the outliner by number."  )
+	cmds.text( 'Sort Outliner' )
+	cmds.button( label='Selection', command='OnBtnSortOutliner( True, False )', annotation="Sorts the selected objects in the outliner by name."  )
+	cmds.button( label='Selection and Children', command='OnBtnSortOutliner( True, True )', annotation="Sorts the selected objects, and all children of the selected objects, in the outliner by name."  )
 	cmds.setParent( '..' )
 	# Frame End
 	cmds.text( label='', height=win_padding )
