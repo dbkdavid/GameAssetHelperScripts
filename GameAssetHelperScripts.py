@@ -1388,6 +1388,61 @@ def OnBtnSortOutliner( isChecked, recursive ):
 	
 	sortOutliner( sel, recursive )
 
+def OnBtnCustomRename( isChecked, input_str, mode ):
+
+	# get the selected objects
+	sel = cmds.ls( selection=True, long=True )
+	
+	# throw an error if nothing is selected
+	if (not sel):
+		cmds.confirmDialog( title='ERROR', message=('ERROR: Nothing selected.'), button=['OK'], defaultButton='OK' )
+		return -1
+	
+	for obj in sel:
+	
+		obj_name = cmds.ls( obj, long=False )[0]
+	
+		if mode=="Add Suffix":
+			cmds.rename( obj, obj_name + input_str )
+		if mode=="Add Prefix":
+			cmds.rename( obj, input_str + obj_name )
+		if mode=="Remove String":
+			name_split = obj_name.split( input_str )
+			new_name = ""
+			for s in name_split:
+				new_name = new_name + s
+			cmds.rename( obj, new_name )
+		if mode=="Remove Last 'n' Chars":
+			try:
+				index = int( input_str )
+			except:
+				cmds.confirmDialog( title='ERROR', message=('ERROR: Please enter an integer.'), button=['OK'], defaultButton='OK' )
+				return -1
+			cmds.rename( obj, obj_name[:-index] )
+		if mode=="Remove First 'n' Chars":
+			try:
+				index = int( input_str )
+			except:
+				cmds.confirmDialog( title='ERROR', message=('ERROR: Please enter an integer.'), button=['OK'], defaultButton='OK' )
+				return -1
+			cmds.rename( obj, obj_name[index:] )
+		# number alphabetically
+		if mode=='Numbering (A)':
+			index = sel.index( obj ) + 1
+			letter = chr( ord( '@' ) + index )
+			new_name = input_str + letter
+			cmds.rename( obj, new_name )
+		if mode=='Numbering (01)' or mode=='Numbering (001)' or mode=='Numbering (0001)':
+			if mode=='Numbering (01)':
+				padding = 2
+			if mode=='Numbering (001)':
+				padding = 3
+			if mode=='Numbering (0001)':
+				padding = 4
+			index = sel.index( obj ) + 1
+			new_name = input_str + str( index ).zfill( padding )
+			cmds.rename( obj, new_name )	
+
 ################################################################################
 ## User Interface
 ################################################################################
@@ -1433,6 +1488,17 @@ def makeColWidth( buttons, mode ):
 			new_entry = ( i+3, ( ( ( win_width - win_first_column_width ) / 2 ) / buttons ) + custom_val )
 			column_width.append( new_entry )
 
+	# text field, option menu and button
+	if mode==3:
+		
+		text_field = (2, ( ( win_width - win_first_column_width ) / 2 ) + 2 )
+		option_menu = (3, ( ( win_width - win_first_column_width ) / 3 ) + 16 )
+		button = (4, ( ( win_width - win_first_column_width ) / 6 ) + 0 )
+		
+		column_width.append( text_field )
+		column_width.append( option_menu )
+		column_width.append( button )
+	
 	return column_width
 
 def makeColAttach( buttons, mode ):
@@ -1658,6 +1724,23 @@ def makeUI():
 	cmds.frameLayout( label='Rename', collapsable=True, collapse=win_frame_is_collapsed, bv=win_border_vis, mh=win_margin, mw=win_margin )
 	cmds.text( '', height=( win_padding/2 ) )
 	cmds.columnLayout( adjustableColumn=True, columnAttach=('both', win_padding), columnOffset=('both', 0), rowSpacing=0 )
+	# Text Field, Option Menu and Button
+	btns_mode = [ 3, 3 ]
+	cmds.rowLayout( numberOfColumns=4, adj=1, columnWidth=makeColWidth( btns_mode[0], btns_mode[1] ), columnAlign=col_align, columnAttach=makeColAttach( btns_mode[0], btns_mode[1] ) )
+	cmds.text( 'Rename Selected' )
+	name = cmds.textField( 'rename_field' )
+	cmds.optionMenu( 'rename_options' )
+	cmds.menuItem( label='Add Prefix' )
+	cmds.menuItem( label='Add Suffix' )
+	cmds.menuItem( label='Remove String' )
+	cmds.menuItem( label="Remove Last 'n' Chars" )
+	cmds.menuItem( label="Remove First 'n' Chars" )
+	cmds.menuItem( label='Numbering (01)' )
+	cmds.menuItem( label='Numbering (001)' )
+	cmds.menuItem( label='Numbering (0001)' )
+	cmds.menuItem( label='Numbering (A)' )
+	cmds.button( label='Rename', command='OnBtnCustomRename( True, cmds.textField( "rename_field", query=True, text=True ), cmds.optionMenu( "rename_options", query=True, value=True ) )', annotation="Rename the selected objects using the selected mode."  )
+	cmds.setParent( '..' )
 	# Button
 	btns_mode = [ 2, 1 ]
 	cmds.rowLayout( numberOfColumns=btns_mode[0]+2, columnWidth=makeColWidth( btns_mode[0], btns_mode[1] ), columnAlign=col_align, adj=1, columnAttach=makeColAttach( btns_mode[0], btns_mode[1] ) )
