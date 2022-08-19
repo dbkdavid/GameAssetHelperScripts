@@ -363,6 +363,8 @@ def sortOutliner( objs, recursive ):
 ## Buttons
 ################################################################################
 
+# Combine, Separate & History
+
 def OnBtnSeparate( isChecked ):
 	
 	# get the selected objects
@@ -374,19 +376,25 @@ def OnBtnSeparate( isChecked ):
 		return -1
 	
 	for obj in sel:
+	
 		shells = getShells( obj )
+		
 		if len( shells ) > 1:
-			cmds.polySeparate( obj )
-			cmds.delete( constructionHistory=True )
-	
-	child_objs = cmds.listRelatives( sel, c=True )
-	
-	for obj in child_objs:
-		cmds.xform( obj, cp=True )
+			# separate objects and store in a list
+			separated_objects = cmds.polySeparate( obj )
+			# delete history
+			cmds.delete( separated_objects, constructionHistory=True )
+			# remove non transforms from list
+			separated_objects = cmds.ls( separated_objects, type="transform", long=True )
+			# center pivots and rename
+			for mesh in separated_objects:
+				short_name = obj.split('|')[-1]
+				cmds.xform( mesh, cp=True )
+				cmds.rename( mesh, short_name )
 	
 	cmds.select( sel ) 
 
-def OnBtnCombine( isChecked ):
+def OnBtnCombine( isChecked, mode ):
 	
 	# get the selected objects
 	sel = cmds.ls( selection=True, long=True )
@@ -396,31 +404,78 @@ def OnBtnCombine( isChecked ):
 		cmds.confirmDialog( title='ERROR', message=('ERROR: Nothing selected.'), button=['OK'], defaultButton='OK' )
 		return -1
 	
-	for grp in sel:
+	if mode == 1:
 		
-		# get the number of objects in the group
-		num_children = len( cmds.listRelatives( grp ) )
+		parents = set()
 		
-		# combine only if there is more than one object in the group
-		if num_children > 1:
-			# get the parent group	
-			parent_grp = cmds.listRelatives( grp, parent=True, fullPath=True )
-			# combine the objects in the group
-			cmds.polyUnite( grp )
-			# delete construction history
-			cmds.delete( constructionHistory=True )
-			# get the group short names
-			short_name = grp.split('|')[-1]	
-			# rename the new object
-			cmds.rename( short_name )
-			# store the new object
-			combined_obj = cmds.ls( selection=True )
-			# clear the selection
-			cmds.select( clear=True )
+		# get the parents
+		for obj in sel:
+			obj_parent = cmds.listRelatives( obj, parent=True, fullPath=True )
+			if obj_parent == None:
+				obj_parent = "root"
+			else:
+				obj_parent = obj_parent[0]
+			parents.add( obj_parent )
+
+		# combine the objects
+		combined = cmds.polyUnite( sel, ch=True, mergeUVSets=True, centerPivot=True )[0]
+
+		# if the objects share a common parent, parent the combined object to the parent
+		if len( parents ) <= 1:
+			parents = list( parents )
+			if parents[0] != "root":
+				cmds.parent( combined, parents[0] )
+
+		# delete history
+		cmds.delete( combined, constructionHistory=True )
+
+		# rename the combined object to the first selection
+		short_name = sel[0].split('|')[-1]
+		cmds.rename( combined, short_name )
+	
+	if mode == 2:
+	
+		for grp in sel:
 			
-			if parent_grp:
-				# parent the new object to the parent group
-				cmds.parent( combined_obj, parent_grp )
+			# get the number of objects in the group
+			num_children = len( cmds.listRelatives( grp ) )
+			
+			# combine only if there is more than one object in the group
+			if num_children > 1:
+				# get the parent group	
+				parent_grp = cmds.listRelatives( grp, parent=True, fullPath=True )
+				# combine the objects in the group
+				combined = cmds.polyUnite( grp, ch=True, mergeUVSets=True, centerPivot=True )[0]
+				# delete construction history
+				cmds.delete( combined, constructionHistory=True )
+				# get the group short names
+				short_name = grp.split('|')[-1]	
+				# rename the new object
+				cmds.rename( short_name )
+				# store the new object
+				combined_obj = cmds.ls( selection=True )
+				# clear the selection
+				cmds.select( clear=True )
+				
+				if parent_grp:
+					# parent the new object to the parent group
+					cmds.parent( combined_obj, parent_grp )
+
+def OnBtnDeleteHistory( isChecked ):
+	
+	# get the selected objects
+	sel = cmds.ls( selection=True, long=True )
+	
+	# throw an error if nothing is selected
+	if (not sel):
+		cmds.confirmDialog( title='ERROR', message=('ERROR: Nothing selected.'), button=['OK'], defaultButton='OK' )
+		return -1
+		
+	for obj in sel:
+	
+		cmds.delete( obj, constructionHistory=True )
+
+# Normals
 
 def OnBtnFixNormals( isChecked ):
 	
@@ -438,7 +493,193 @@ def OnBtnFixNormals( isChecked ):
 		#cmds.polySoftEdge( obj, a=60, ch=0 )
 		cmds.polySoftEdge( obj, a=180 )
 		cmds.select( clear=True )
+
+# Topology
+
+def OnBtnDeleteExtruded( isChecked ):
+	
+	# get the selected objects
+	sel = cmds.ls( selection=True, long=True )
+	
+	# throw an error if nothing is selected
+	if (not sel):
+		cmds.confirmDialog( title='ERROR', message=('ERROR: Nothing selected.'), button=['OK'], defaultButton='OK' )
+		return -1
+	
+	for obj in sel:
 		
+		verts = cmds.polyListComponentConversion( obj, toVertex=True )
+		verts = cmds.ls( verts, flatten=True )
+		
+		# make a list to hold the corner verts
+		corner_verts = list()
+		# make a list to hold two edge verts
+		two_edge_verts = list()
+		
+		# get the corner verts
+		for v in verts:
+			edges = cmds.polyListComponentConversion( v, toEdge=True )
+			edges = cmds.ls( edges, flatten=True )
+			if len( edges ) <= 3:
+				corner_verts.append( v )
+			if len( edges ) == 2:
+				two_edge_verts.append( v )
+		
+		if len( corner_verts ) >= 8 and len( two_edge_verts ) < 1:
+		
+			# get the corner internal edges
+			corner_internal_edges = cmds.polyListComponentConversion( corner_verts, toEdge=True, internal=True )
+			corner_internal_edges = cmds.ls( corner_internal_edges, flatten=True )
+			corner_internal_edges = set( corner_internal_edges )
+			
+			# get the corner edges
+			corner_edges = cmds.polyListComponentConversion( corner_verts, toEdge=True )
+			corner_edges = cmds.ls( corner_edges, flatten=True )
+			corner_edges = set( corner_edges )
+			
+			# get the corner seam edges
+			corner_seam_edges = corner_edges.difference( corner_internal_edges )
+			corner_seam_edges = list( corner_seam_edges )
+			
+			# get the seam edges
+			cmds.select( corner_seam_edges )
+			cmds.polySelectConstraint( pp=4, t=0x8000, m=2 )
+			seam_edges = cmds.ls( selection=True, flatten=True )
+			
+			# get the seam faces
+			seam_verts = cmds.polyListComponentConversion( seam_edges, toVertex=True )
+			seam_faces = cmds.polyListComponentConversion( seam_verts, toFace=True, internal=True )
+			
+			cmds.select( seam_faces )
+			
+			cmds.delete( seam_faces )
+			
+			cmds.select( verts[0] )
+			cmds.polySelectConstraint( shell=True, t=0x0001, m=2 )
+			back_faces = cmds.ls( selection=True, flatten=True )
+			back_faces = cmds.polyListComponentConversion( back_faces, toFace=True )
+			cmds.select( clear=True )
+			cmds.polySelectConstraint( shell=False )
+			
+			cmds.delete( back_faces )
+	
+	cmds.select( sel )
+
+def OnBtnPolyRetopo( isChecked ):
+
+	# get the selected objects
+	sel = cmds.ls( selection=True, long=True )
+	
+	# throw an error if nothing is selected
+	if (not sel):
+		cmds.confirmDialog( title='ERROR', message=('ERROR: Nothing selected.'), button=['OK'], defaultButton='OK' )
+		return -1
+	
+	for obj in sel:
+	
+		cmds.polyRetopo( obj, targetFaceCount=10 )
+
+# UV
+
+def OnBtnDeleteUV( isChecked ):
+	
+	# get the selected objects
+	sel = cmds.ls( selection=True, long=True )
+	
+	# throw an error if nothing is selected
+	if (not sel):
+		cmds.confirmDialog( title='ERROR', message=('ERROR: Nothing selected.'), button=['OK'], defaultButton='OK' )
+		return -1
+	
+	for obj in sel:
+		
+		# get the names of all uv sets
+		uv_sets = cmds.polyUVSet( obj, auv=True, query=True )
+		
+		# if there are no uv sets, create one
+		if len( uv_sets ) == 0:
+			cmds.polyUVSet( obj, create=True, uvSet="map1" )
+		
+		# otherwise, delete all uv sets except for the first and name it to map1
+		else:
+			
+			# get the first uv set
+			first_uv_set = uv_sets[0]
+			
+			# if there are additional uv sets, delete them
+			if len( uv_sets ) > 1:
+				uv_sets.pop( 0 )
+				for uv_set in uv_sets:
+					# delete the uv set
+					cmds.polyUVSet( obj, delete=True, uvSet=uv_set )
+			
+			# check if map1 exists
+			if first_uv_set != "map1":
+				# rename the first uv set to map1
+				cmds.polyUVSet( obj, rename=True, uvSet=first_uv_set, newUVSet="map1" )
+		
+		# set the current uv set
+		cmds.polyUVSet( obj, currentUVSet=True, uvSet="map1" )
+		
+		# delete the contents of map1
+		cmds.polyMapDel( obj )
+		
+		# delete construction history
+		cmds.delete( constructionHistory=True )
+
+	cmds.select( clear=True )
+
+def onBtnScaleUvQuad( isChecked, uv_set ):
+	
+	# get the selected objects
+	sel = cmds.ls( selection=True, long=True )
+	
+	# throw an error if nothing is selected
+	if (not sel):
+		cmds.confirmDialog( title='ERROR', message=('ERROR: Nothing selected.'), button=['OK'], defaultButton='OK' )
+		return -1
+	
+	for obj in sel:
+		corner_verts = getVertsWithEdgeCount( obj, 2 )
+		corner_edges = cmds.polyListComponentConversion( corner_verts[0], toEdge=True )
+		dimension_edges = list()
+		
+		for e in corner_edges:
+			cmds.select( e )
+			cmds.polySelectConstraint( m2a=45, m3a=180, m=2, t=0x8000, pp=4 )
+			edges = cmds.ls( selection=True, flatten=True )
+			cmds.select( clear=True )
+			dimension_edges.append( edges )
+		
+		edge_lengths = list()
+		
+		for e_list in dimension_edges:
+			edge_lengths.append( getEdgeLengthSum( e_list ) )
+		
+		a = edge_lengths[0] / edge_lengths[1]
+		b = edge_lengths[1] / edge_lengths[0]
+		
+		length_ratio = 1
+		
+		'''
+		if a < b:
+			length_ratio = a
+		else:
+			length_ratio = b
+		
+		print( length_ratio )
+		'''
+		
+		length_ratio = a
+		
+		cmds.polyUVSet( obj, uvs=uv_set, cuv=True )
+		uvs = cmds.polyListComponentConversion( obj, toUV=True )
+		cmds.polyEditUV( uvs, pu=0, pv=0, su=length_ratio )
+	
+	cmds.select( sel )
+
+# Multi UV Set Workflow
+
 def OnBtnInitializeUV( isChecked ):
 	
 	# get the selected objects
@@ -492,54 +733,6 @@ def OnBtnInitializeUV( isChecked ):
 		# set the current uv set
 		cmds.polyUVSet( obj, currentUVSet=True, uvSet="map1" )
 	
-	cmds.select( clear=True )
-
-def OnBtnDeleteUV( isChecked ):
-	
-	# get the selected objects
-	sel = cmds.ls( selection=True, long=True )
-	
-	# throw an error if nothing is selected
-	if (not sel):
-		cmds.confirmDialog( title='ERROR', message=('ERROR: Nothing selected.'), button=['OK'], defaultButton='OK' )
-		return -1
-	
-	for obj in sel:
-		
-		# get the names of all uv sets
-		uv_sets = cmds.polyUVSet( obj, auv=True, query=True )
-		
-		# if there are no uv sets, create one
-		if len( uv_sets ) == 0:
-			cmds.polyUVSet( obj, create=True, uvSet="map1" )
-		
-		# otherwise, delete all uv sets except for the first and name it to map1
-		else:
-			
-			# get the first uv set
-			first_uv_set = uv_sets[0]
-			
-			# if there are additional uv sets, delete them
-			if len( uv_sets ) > 1:
-				uv_sets.pop( 0 )
-				for uv_set in uv_sets:
-					# delete the uv set
-					cmds.polyUVSet( obj, delete=True, uvSet=uv_set )
-			
-			# check if map1 exists
-			if first_uv_set != "map1":
-				# rename the first uv set to map1
-				cmds.polyUVSet( obj, rename=True, uvSet=first_uv_set, newUVSet="map1" )
-		
-		# set the current uv set
-		cmds.polyUVSet( obj, currentUVSet=True, uvSet="map1" )
-		
-		# delete the contents of map1
-		cmds.polyMapDel( obj )
-		
-		# delete construction history
-		cmds.delete( constructionHistory=True )
-
 	cmds.select( clear=True )
 
 def OnBtnUnfoldLayout( isChecked ):
@@ -668,89 +861,6 @@ def OnBtnCopyUVSetToStacked( isChecked ):
 	
 	cmds.select( sel )
 
-def OnBtnDeleteExtruded( isChecked ):
-	
-	# get the selected objects
-	sel = cmds.ls( selection=True, long=True )
-	
-	# throw an error if nothing is selected
-	if (not sel):
-		cmds.confirmDialog( title='ERROR', message=('ERROR: Nothing selected.'), button=['OK'], defaultButton='OK' )
-		return -1
-	
-	for obj in sel:
-		
-		verts = cmds.polyListComponentConversion( obj, toVertex=True )
-		verts = cmds.ls( verts, flatten=True )
-		
-		# make a list to hold the corner verts
-		corner_verts = list()
-		# make a list to hold two edge verts
-		two_edge_verts = list()
-		
-		# get the corner verts
-		for v in verts:
-			edges = cmds.polyListComponentConversion( v, toEdge=True )
-			edges = cmds.ls( edges, flatten=True )
-			if len( edges ) <= 3:
-				corner_verts.append( v )
-			if len( edges ) == 2:
-				two_edge_verts.append( v )
-		
-		if len( corner_verts ) >= 8 and len( two_edge_verts ) < 1:
-		
-			# get the corner internal edges
-			corner_internal_edges = cmds.polyListComponentConversion( corner_verts, toEdge=True, internal=True )
-			corner_internal_edges = cmds.ls( corner_internal_edges, flatten=True )
-			corner_internal_edges = set( corner_internal_edges )
-			
-			# get the corner edges
-			corner_edges = cmds.polyListComponentConversion( corner_verts, toEdge=True )
-			corner_edges = cmds.ls( corner_edges, flatten=True )
-			corner_edges = set( corner_edges )
-			
-			# get the corner seam edges
-			corner_seam_edges = corner_edges.difference( corner_internal_edges )
-			corner_seam_edges = list( corner_seam_edges )
-			
-			# get the seam edges
-			cmds.select( corner_seam_edges )
-			cmds.polySelectConstraint( pp=4, t=0x8000, m=2 )
-			seam_edges = cmds.ls( selection=True, flatten=True )
-			
-			# get the seam faces
-			seam_verts = cmds.polyListComponentConversion( seam_edges, toVertex=True )
-			seam_faces = cmds.polyListComponentConversion( seam_verts, toFace=True, internal=True )
-			
-			cmds.select( seam_faces )
-			
-			cmds.delete( seam_faces )
-			
-			cmds.select( verts[0] )
-			cmds.polySelectConstraint( shell=True, t=0x0001, m=2 )
-			back_faces = cmds.ls( selection=True, flatten=True )
-			back_faces = cmds.polyListComponentConversion( back_faces, toFace=True )
-			cmds.select( clear=True )
-			cmds.polySelectConstraint( shell=False )
-			
-			cmds.delete( back_faces )
-	
-	cmds.select( sel )
-
-def OnBtnPolyRetopo( isChecked ):
-
-	# get the selected objects
-	sel = cmds.ls( selection=True, long=True )
-	
-	# throw an error if nothing is selected
-	if (not sel):
-		cmds.confirmDialog( title='ERROR', message=('ERROR: Nothing selected.'), button=['OK'], defaultButton='OK' )
-		return -1
-	
-	for obj in sel:
-	
-		cmds.polyRetopo( obj, targetFaceCount=10 )
-
 def OnBtnUnitizeUVPlanar( isChecked, uvset_name ):
 	
 	# get the selected objects
@@ -844,6 +954,8 @@ def OnBtnUnitizeUVPolar( isChecked, uvset_name ):
 	
 	cmds.select( sel )
 
+# PaintFX
+
 def onBtnPaintFXMergeAndCloseHoles( isChecked ):
 	
 	# get the selected objects
@@ -905,6 +1017,8 @@ def onBtnPaintFXToPoly( isChecked ):
 
 	for grp in strokes_groups:
 		cmds.delete( grp )
+
+# Transforms
 
 def OnBtnCenterYMin( isChecked ):
 	
@@ -991,18 +1105,24 @@ def OnBtnSetPivot( isChecked, mode ):
 		# get bounding box
 		bbox = cmds.exactWorldBoundingBox( obj, ii=True )
 		
+		x_pos = ( bbox[0] + bbox[3] ) / 2
+		y_pos = ( bbox[1] + bbox[4] ) / 2
+		z_pos = ( bbox[2] + bbox[5] ) / 2
+		
+		if mode == "xmax":
+			x_pos = bbox[3]
+		if mode == "xmin":
+			x_pos = bbox[0]		
 		if mode == "ymax":
-			# get center point at Y max
-			x_pos = ( bbox[0] + bbox[3] ) / 2
 			y_pos = bbox[4]
-			z_pos = ( bbox[2] + bbox[5] ) / 2
-			new_pivot = [ x_pos, y_pos, z_pos ]
-		elif mode == "ymin":
-			# get center point at Y min
-			x_pos = ( bbox[0] + bbox[3] ) / 2
+		if mode == "ymin":
 			y_pos = bbox[1]
-			z_pos = ( bbox[2] + bbox[5] ) / 2
-			new_pivot = [ x_pos, y_pos, z_pos ]
+		if mode == "zmax":
+			z_pos = bbox[5]
+		if mode == "zmin":
+			z_pos = bbox[2]
+
+		new_pivot = [ x_pos, y_pos, z_pos ]
 		
 		# move pivot
 		cmds.xform( obj, piv=new_pivot, ws=True )
@@ -1123,7 +1243,7 @@ def OnBtnDistribute( isChecked, mode, value ):
 		# move the object to the new position
 		cmds.xform( geo_nodes[i], t=new_trans, ws=True )
 
-def OnBtnZeroTranslation( isChecked ):
+def OnBtnResetTransform( isChecked, mode ):
 
 	# get the selected objects
 	sel = cmds.ls( selection=True, long=True )
@@ -1146,9 +1266,17 @@ def OnBtnZeroTranslation( isChecked ):
 	for obj in sel_and_children:
 		
 		if cmds.nodeType( obj ) == "transform":
-			cmds.xform( obj, t=[ 0, 0, 0 ], ws=True )
+		
+			if mode == "trans":
+				cmds.xform( obj, t=[ 0, 0, 0 ], ws=True )
+			if mode == "rot":
+				cmds.xform( obj, ro=[ 0, 0, 0 ], ws=True )
+			if mode == "scale":
+				cmds.xform( obj, s=[ 1, 1, 1 ], ws=True )
 
-def OnBtnSortOutliner( isChecked ):
+# Outliner
+
+def OnBtnSortOutliner( isChecked, recursive ):
 
 	# get the selected objects
 	sel = cmds.ls( selection=True, long=True )
@@ -1158,32 +1286,9 @@ def OnBtnSortOutliner( isChecked ):
 		cmds.confirmDialog( title='ERROR', message=('ERROR: Nothing selected.'), button=['OK'], defaultButton='OK' )
 		return -1
 	
-	int_list = list()
+	sortOutliner( sel, recursive )
 
-	for obj in sel:
-		match = re.split(r"([0-9]+)", obj )
-		for i in range( len( match ) ):
-			j = len( match ) - i - 1
-			try:
-				integer = int( match[ j ] )
-				int_list.append( integer )
-				break
-			except ValueError:
-				integer = None
-
-	obj_name_int = list()
-
-	for i in range( len( sel ) ):
-		new_entry = [ sel[i], int_list[i] ]
-		obj_name_int.append( new_entry )
-		
-	# sort list with key
-	obj_name_int.sort( key=takeSecond )
-
-	for i in range( len( obj_name_int ) ):
-		length = len( obj_name_int )
-		obj = obj_name_int[ length - 1 - i ][0]
-		cmds.reorder( obj, f=True )
+# Materials
 
 def OnBtnAssignRampMat( isChecked ):
 
@@ -1217,68 +1322,7 @@ def OnBtnAssignRampMat( isChecked ):
 		# link the uv set
 		cmds.uvLink( make=True, uvSet=( obj + ".uvSet[1].uvSetName" ), texture=ramp )
 
-def OnBtnDeleteHistory( isChecked ):
-	
-	# get the selected objects
-	sel = cmds.ls( selection=True, long=True )
-	
-	# throw an error if nothing is selected
-	if (not sel):
-		cmds.confirmDialog( title='ERROR', message=('ERROR: Nothing selected.'), button=['OK'], defaultButton='OK' )
-		return -1
-		
-	for obj in sel:
-	
-		cmds.delete( obj, constructionHistory=True )
-
-def onBtnScaleUvQuad( isChecked, uv_set ):
-	
-	# get the selected objects
-	sel = cmds.ls( selection=True, long=True )
-	
-	# throw an error if nothing is selected
-	if (not sel):
-		cmds.confirmDialog( title='ERROR', message=('ERROR: Nothing selected.'), button=['OK'], defaultButton='OK' )
-		return -1
-	
-	for obj in sel:
-		corner_verts = getVertsWithEdgeCount( obj, 2 )
-		corner_edges = cmds.polyListComponentConversion( corner_verts[0], toEdge=True )
-		dimension_edges = list()
-		
-		for e in corner_edges:
-			cmds.select( e )
-			cmds.polySelectConstraint( m2a=45, m3a=180, m=2, t=0x8000, pp=4 )
-			edges = cmds.ls( selection=True, flatten=True )
-			cmds.select( clear=True )
-			dimension_edges.append( edges )
-		
-		edge_lengths = list()
-		
-		for e_list in dimension_edges:
-			edge_lengths.append( getEdgeLengthSum( e_list ) )
-		
-		a = edge_lengths[0] / edge_lengths[1]
-		b = edge_lengths[1] / edge_lengths[0]
-		
-		length_ratio = 1
-		
-		'''
-		if a < b:
-			length_ratio = a
-		else:
-			length_ratio = b
-		
-		print( length_ratio )
-		'''
-		
-		length_ratio = a
-		
-		cmds.polyUVSet( obj, uvs=uv_set, cuv=True )
-		uvs = cmds.polyListComponentConversion( obj, toUV=True )
-		cmds.polyEditUV( uvs, pu=0, pv=0, su=length_ratio )
-	
-	cmds.select( sel )
+# Vertex Color
 
 def OnBtnApplyVertColor( isChecked, mode, channel ):
 	
@@ -1332,6 +1376,8 @@ def OnBtnApplyVertColor( isChecked, mode, channel ):
 			#print( result_color )
 			cmds.polyColorPerVertex( verts[i], rgb=result_color, rel=additive, cdo=True )
 
+# Rename
+
 def OnBtnRenameFromSel( isChecked, name_mode, selection_mode, num_mode, new_name ):
 
 	# get the selected objects
@@ -1375,18 +1421,6 @@ def OnBtnRenameFromSel( isChecked, name_mode, selection_mode, num_mode, new_name
 			sel.sort()
 			for i in range( len( sel ) ):
 				customRename( sel[i], name_base, sep, padding, i, first_index, num_mode )
-
-def OnBtnSortOutliner( isChecked, recursive ):
-
-	# get the selected objects
-	sel = cmds.ls( selection=True, long=True )
-	
-	# throw an error if nothing is selected
-	if (not sel):
-		cmds.confirmDialog( title='ERROR', message=('ERROR: Nothing selected.'), button=['OK'], defaultButton='OK' )
-		return -1
-	
-	sortOutliner( sel, recursive )
 
 def OnBtnCustomRename( isChecked, input_str, mode ):
 
@@ -1684,28 +1718,36 @@ def makeUI():
 	cmds.button( label='Z', command='OnBtnDistribute( "True", "z", cmds.floatSliderGrp( "dist_val", q=True, v=True) )', annotation="Distribute the selected objects along the Z axis."  )
 	cmds.setParent( '..' )
 	# Button
-	btns_mode = [ 1, 1 ]
+	btns_mode = [ 3, 1 ]
 	cmds.rowLayout( numberOfColumns=btns_mode[0]+2, columnWidth=makeColWidth( btns_mode[0], btns_mode[1] ), columnAlign=col_align, adj=1, columnAttach=makeColAttach( btns_mode[0], btns_mode[1] ) )
 	cmds.text( 'Randomize Rotation' )
+	cmds.button( label='X', command='OnBtnRandRot( "True", "x" )', annotation="Randomize the rotation of the selected objects."  )
 	cmds.button( label='Y', command='OnBtnRandRot( "True", "y" )', annotation="Randomize the rotation of the selected objects."  )
+	cmds.button( label='Z', command='OnBtnRandRot( "True", "z" )', annotation="Randomize the rotation of the selected objects."  )
 	cmds.setParent( '..' )
 	# Button
-	btns_mode = [ 1, 1 ]
+	btns_mode = [ 3, 1 ]
 	cmds.rowLayout( numberOfColumns=btns_mode[0]+2, columnWidth=makeColWidth( btns_mode[0], btns_mode[1] ), columnAlign=col_align, adj=1, columnAttach=makeColAttach( btns_mode[0], btns_mode[1] ) )
-	cmds.text( 'Zero' )
-	cmds.button( label='Translation', command=OnBtnZeroTranslation, annotation="Sets translation to zero on the selected transforms."  )
+	cmds.text( 'Reset Transforms' )
+	cmds.button( label='Translation', command='OnBtnResetTransform( "True", "trans" )', annotation="Sets translation to zero on the selected transforms."  )
+	cmds.button( label='Rotation', command='OnBtnResetTransform( "True", "rot" )', annotation="Sets rotation to zero on the selected transforms."  )
+	cmds.button( label='Scale', command='OnBtnResetTransform( "True", "scale" )', annotation="Sets scale to one on the selected transforms."  )
 	cmds.setParent( '..' )
 	# Buttons
-	btns_mode = [ 2, 1 ]
+	btns_mode = [ 6, 1 ]
 	cmds.rowLayout( numberOfColumns=btns_mode[0]+1, adj=1, columnWidth=makeColWidth( btns_mode[0], btns_mode[1] ), columnAlign=col_align, columnAttach=makeColAttach( btns_mode[0], btns_mode[1] ) )
 	cmds.text( 'Set Pivot' )
+	cmds.button( label='X Min', command='OnBtnSetPivot( "True", "xmin" )', annotation="Sets the pivot point of the selected objects to the minimum x position of the object."  )
+	cmds.button( label='X Max', command='OnBtnSetPivot( "True", "xmax" )', annotation="Sets the pivot point of the selected objects to the maximum x position of the object."  )
 	cmds.button( label='Y Min', command='OnBtnSetPivot( "True", "ymin" )', annotation="Sets the pivot point of the selected objects to the minimum y position of the object."  )
 	cmds.button( label='Y Max', command='OnBtnSetPivot( "True", "ymax" )', annotation="Sets the pivot point of the selected objects to the maximum y position of the object."  )
+	cmds.button( label='Z Min', command='OnBtnSetPivot( "True", "zmin" )', annotation="Sets the pivot point of the selected objects to the minimum z position of the object."  )
+	cmds.button( label='Z Max', command='OnBtnSetPivot( "True", "zmax" )', annotation="Sets the pivot point of the selected objects to the maximum z position of the object."  )
 	cmds.setParent( '..' )
 	# Buttons
 	btns_mode = [ 1, 1 ]
 	cmds.rowLayout( numberOfColumns=btns_mode[0]+1, adj=1, columnWidth=makeColWidth( btns_mode[0], btns_mode[1] ), columnAlign=col_align, columnAttach=makeColAttach( btns_mode[0], btns_mode[1] ) )
-	cmds.text( 'Set Pivot & Freeze' )
+	cmds.text( 'Set Pivot to World Origin' )
 	cmds.button( label='World Origin', command=OnBtnPivotToWorldOrigin, annotation="Sets the pivot point on the selected objects to the world origin and freezes transformations."  )
 	cmds.setParent( '..' )
 	# Buttons
@@ -1745,15 +1787,15 @@ def makeUI():
 	btns_mode = [ 2, 1 ]
 	cmds.rowLayout( numberOfColumns=btns_mode[0]+2, columnWidth=makeColWidth( btns_mode[0], btns_mode[1] ), columnAlign=col_align, adj=1, columnAttach=makeColAttach( btns_mode[0], btns_mode[1] ) )
 	cmds.text( 'From Group' )
-	cmds.button( label='ABC', command='OnBtnRenameFromSel( True, 1, 1, 2, "" )', annotation="Rename the selected objects alphabetically based on the group name."  )
-	cmds.button( label='123', command='OnBtnRenameFromSel( True, 1, 1, 1, "" )', annotation="Rename the selected objects numerically with a padding of '2' based on the group name."  )
+	cmds.button( label='( A )', command='OnBtnRenameFromSel( True, 1, 1, 2, "" )', annotation="Rename the selected objects alphabetically based on the group name."  )
+	cmds.button( label='( 01 )', command='OnBtnRenameFromSel( True, 1, 1, 1, "" )', annotation="Rename the selected objects numerically with a padding of '2' based on the group name."  )
 	cmds.setParent( '..' )
 	# Button
 	btns_mode = [ 2, 1 ]
 	cmds.rowLayout( numberOfColumns=btns_mode[0]+2, columnWidth=makeColWidth( btns_mode[0], btns_mode[1] ), columnAlign=col_align, adj=1, columnAttach=makeColAttach( btns_mode[0], btns_mode[1] ) )
 	cmds.text( 'From Last Selected' )
-	cmds.button( label='ABC', command='OnBtnRenameFromSel( True, 1, 2, 2, "" )', annotation="Rename the selected objects alphabetically based on the last selected object."  )
-	cmds.button( label='123', command='OnBtnRenameFromSel( True, 1, 2, 1, "" )', annotation="Rename the selected objects numerically with a padding of '2' based on the last selected object."  )
+	cmds.button( label='( A )', command='OnBtnRenameFromSel( True, 1, 2, 2, "" )', annotation="Rename the selected objects alphabetically based on the last selected object."  )
+	cmds.button( label='( 01 )', command='OnBtnRenameFromSel( True, 1, 2, 1, "" )', annotation="Rename the selected objects numerically with a padding of '2' based on the last selected object."  )
 	cmds.setParent( '..' )
 	# Frame End
 	cmds.text( label='', height=win_padding )
@@ -1783,19 +1825,20 @@ def makeUI():
 	# Buttons
 	btns_mode = [ 1, 1 ]
 	cmds.rowLayout( numberOfColumns=btns_mode[0]+1, adj=1, columnWidth=makeColWidth( btns_mode[0], btns_mode[1] ), columnAlign=col_align, columnAttach=makeColAttach( btns_mode[0], btns_mode[1] ) )
-	cmds.text( '' )
-	cmds.button( label='Separate Meshes and Delete History', command=OnBtnSeparate, annotation="Separates the polygon shells in the selected objects into distinct objects."  )
+	cmds.text( 'Separate' )
+	cmds.button( label='Separate and Delete History', command=OnBtnSeparate, annotation="Separates the polygon shells in the selected objects into distinct objects."  )
+	cmds.setParent( '..' )
+	# Buttons
+	btns_mode = [ 2, 1 ]
+	cmds.rowLayout( numberOfColumns=btns_mode[0]+1, adj=1, columnWidth=makeColWidth( btns_mode[0], btns_mode[1] ), columnAlign=col_align, columnAttach=makeColAttach( btns_mode[0], btns_mode[1] ) )
+	cmds.text( 'Combine' )
+	cmds.button( label='Combine', command='OnBtnCombine( "True", 1 )', annotation="Combines all of the selected objects."  )
+	cmds.button( label='Combine Groups', command='OnBtnCombine( "True", 2 )', annotation="Combines the objects within the selected groups into one object per group."  )
 	cmds.setParent( '..' )
 	# Buttons
 	btns_mode = [ 1, 1 ]
 	cmds.rowLayout( numberOfColumns=btns_mode[0]+1, adj=1, columnWidth=makeColWidth( btns_mode[0], btns_mode[1] ), columnAlign=col_align, columnAttach=makeColAttach( btns_mode[0], btns_mode[1] ) )
-	cmds.text( '' )
-	cmds.button( label='Combine Groups and Delete History', command=OnBtnCombine, annotation="Combines the objects within the selected groups into one object per group."  )
-	cmds.setParent( '..' )
-	# Buttons
-	btns_mode = [ 1, 1 ]
-	cmds.rowLayout( numberOfColumns=btns_mode[0]+1, adj=1, columnWidth=makeColWidth( btns_mode[0], btns_mode[1] ), columnAlign=col_align, columnAttach=makeColAttach( btns_mode[0], btns_mode[1] ) )
-	cmds.text( '' )
+	cmds.text( 'History' )
 	cmds.button( label='Delete History', command=OnBtnDeleteHistory, annotation="Deletes construction history on selected objects."  )
 	cmds.setParent( '..' )
 	# Frame End
