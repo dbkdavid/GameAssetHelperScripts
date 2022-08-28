@@ -358,7 +358,7 @@ def sortOutliner( objs, recursive, reverse ):
 	if recursive:
 		child_transforms = getChildTransforms( objs )
 		if child_transforms:
-			sortOutliner( child_transforms, True )
+			sortOutliner( child_transforms, True, reverse )
 
 ################################################################################
 ## Buttons
