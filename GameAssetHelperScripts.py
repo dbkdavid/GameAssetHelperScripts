@@ -331,7 +331,7 @@ def getChildTransforms( objs ):
 			child_transforms.append( t )
 	return child_transforms
 
-def sortOutliner( objs, recursive ):
+def sortOutliner( objs, recursive, reverse ):
 
 	parent_child_list = getParentChildList( objs )	
 	unique_parents = getUniqueParents( objs )
@@ -341,7 +341,8 @@ def sortOutliner( objs, recursive ):
 	
 	for i in range( len( grouped_children ) ):
 		grouped_children[i].sort()
-		grouped_children[i].reverse()
+		if not reverse:
+			grouped_children[i].reverse()
 	
 	for i in range( len( above_selected ) ):
 		above_selected[i].reverse()
@@ -565,7 +566,7 @@ def OnBtnDeleteExtruded( isChecked ):
 	
 	cmds.select( sel )
 
-def OnBtnPolyRetopo( isChecked ):
+def OnBtnPolyRetopo( isChecked, face_count ):
 
 	# get the selected objects
 	sel = cmds.ls( selection=True, long=True )
@@ -577,7 +578,7 @@ def OnBtnPolyRetopo( isChecked ):
 	
 	for obj in sel:
 	
-		cmds.polyRetopo( obj, targetFaceCount=10 )
+		cmds.polyRetopo( obj, targetFaceCount=face_count )
 
 # UV
 
@@ -1276,7 +1277,7 @@ def OnBtnResetTransform( isChecked, mode ):
 
 # Outliner
 
-def OnBtnSortOutliner( isChecked, recursive ):
+def OnBtnSortOutliner( isChecked, recursive, reverse ):
 
 	# get the selected objects
 	sel = cmds.ls( selection=True, long=True )
@@ -1286,7 +1287,7 @@ def OnBtnSortOutliner( isChecked, recursive ):
 		cmds.confirmDialog( title='ERROR', message=('ERROR: Nothing selected.'), button=['OK'], defaultButton='OK' )
 		return -1
 	
-	sortOutliner( sel, recursive )
+	sortOutliner( sel, recursive, reverse )
 
 # Materials
 
@@ -1477,6 +1478,116 @@ def OnBtnCustomRename( isChecked, input_str, mode ):
 			new_name = input_str + str( index ).zfill( padding )
 			cmds.rename( obj, new_name )	
 
+# Utility
+
+def OnBtnLocatorsFromTransforms( isChecked ):
+
+	# get the selected objects
+	sel = cmds.ls( selection=True, long=True )
+	
+	# throw an error if nothing is selected
+	if (not sel):
+		cmds.confirmDialog( title='ERROR', message=('ERROR: Nothing selected.'), button=['OK'], defaultButton='OK' )
+		return -1
+	
+	short_name = cmds.ls( sel[0], long=False )[0]
+	new_group = cmds.group( em=True, name=( short_name + "_Locators" ) )
+	
+	for obj in sel:
+		
+		# get the object name
+		short_name = cmds.ls( obj, long=False )[0]
+		# get the transform
+		obj_transform = cmds.xform( obj, matrix=True, query=True )
+		# make a new locator
+		new_locator = cmds.spaceLocator()
+		# get the shape node
+		locator_shape = cmds.listRelatives( new_locator )[0]
+		
+		# set the local scale of the shape node
+		cmds.setAttr( locator_shape + ".localScaleX", 10 )
+		cmds.setAttr( locator_shape + ".localScaleY", 10 )
+		cmds.setAttr( locator_shape + ".localScaleZ", 10 )
+		
+		# set the locator transform
+		cmds.xform( new_locator, matrix=obj_transform )
+		# rename the locator
+		obj_rename = cmds.rename( new_locator, short_name + "_lctr" )
+		# parent it to the new group
+		cmds.parent( obj_rename, new_group)
+
+def OnBtnCopyAlembicWithDelay( isChecked, num_instances ):
+
+	# get the selected objects
+	sel = cmds.ls( selection=True, long=True )
+	
+	# throw an error if nothing is selected
+	if (not sel):
+		cmds.confirmDialog( title='ERROR', message=('ERROR: Nothing selected.'), button=['OK'], defaultButton='OK' )
+		return -1
+	
+	# get nodes
+	obj_name = cmds.ls( sel, long=False )[0]
+	obj = sel[0]
+	shape = cmds.listRelatives( sel, type="mesh", f=True )
+	alembic_node = cmds.listConnections( shape, type="AlembicNode" )
+
+	# make master alembic
+	master_alembic = cmds.duplicate( alembic_node, n=( obj_name + "_AlembicNode" + "_Master" ) )
+
+	# make frame offset float
+	float_constant = cmds.shadingNode( "floatConstant", asUtility=True, n=( obj_name + "_FrameOffset") )
+	cmds.setAttr( float_constant + ".inFloat", 10 )
+
+	# define the list to hold the expression
+	expression_text = list()
+	new_line = "float $offset = " + obj_name + "_FrameOffset.outFloat;"
+	expression_text.append( new_line )
+	expression_text.append( "" )
+
+	# make a new group
+	new_grp = cmds.group( em=True, n=( obj_name + "_Alembic_grp" ) )
+
+	# duplicate the object and alembic, connect them, add a new line to the expression, parent the object to the group
+	for i in range( num_instances ):
+		new_obj = cmds.duplicate( obj, n=( obj_name + "_" + str(i) ) )
+		shape = cmds.listRelatives( new_obj, type="mesh", f=True )
+		alembic_node = cmds.duplicate( alembic_node, n=( obj_name + "_AlembicNode" + "_" + str(i) ) )
+		cmds.connectAttr( master_alembic[0] + ".abc_File", alembic_node[0] + ".abc_File" )
+		cmds.connectAttr( alembic_node[0] + ".outPolyMesh[0]", shape[0] + ".inMesh" )
+		new_line = obj_name + "_AlembicNode_" + str(i) + ".time = frame - ( $offset * " + str(i) + " );"
+		expression_text.append( new_line )
+		cmds.parent( new_obj, new_grp )
+
+	# convert the expression list to a usable string
+	expression_string = ""
+	for line in expression_text:
+		expression_string = expression_string + "\n" + line
+
+	# make the expression
+	cmds.expression( s=expression_string, n=( obj_name + "_Expression" ), ae=1, uc="all" )
+
+def OnBtnBatchApplyTransforms( isChecked ):
+
+	# get the selected objects
+	sel = cmds.ls( selection=True, long=True )
+	
+	# throw an error if nothing is selected
+	if (not sel):
+		cmds.confirmDialog( title='ERROR', message=('ERROR: Nothing selected.'), button=['OK'], defaultButton='OK' )
+		return -1
+	
+	obj_grp = sel[0]
+	transform_grp = sel[1]
+
+	objs = cmds.listRelatives( obj_grp, f=True )
+	transforms = cmds.listRelatives( transform_grp, f=True )
+
+	for i in range( len( objs ) ):
+		matrix = cmds.xform( transforms[i], m=True, query=True )
+		cmds.xform( objs[i], m=matrix )
+
+
 ################################################################################
 ## User Interface
 ################################################################################
@@ -1583,13 +1694,13 @@ def makeUI():
 	btns_mode = [ 1, 2 ]
 	cmds.rowLayout( numberOfColumns=btns_mode[0]+2, columnWidth=makeColWidth( btns_mode[0], btns_mode[1] ), columnAlign=col_align, adj=1, columnAttach=makeColAttach( btns_mode[0], btns_mode[1] ) )
 	cmds.text( '' )
-	cmds.floatSliderGrp( field=True, value=10, minValue=0.0, maxValue=100.0, fieldMinValue=-1.0e+06, fieldMaxValue=1.0e+06 )
-	cmds.button( label='Poly Retopo', command=OnBtnPolyRetopo, annotation="Retopologizes the selected objects."  )
+	cmds.floatSliderGrp( 'face_count_val', field=True, value=10, minValue=0.0, maxValue=100.0, fieldMinValue=-1.0e+06, fieldMaxValue=1.0e+06 )
+	cmds.button( label='Poly Retopo', command='OnBtnPolyRetopo( "True", cmds.floatSliderGrp( "face_count_val", q=True, v=True) )', annotation="Retopologizes the selected objects."  )
 	cmds.setParent( '..' )
 	# Frame End
 	cmds.text( label='', height=win_padding )
 	cmds.setParent( main_layout )
-
+	
 
 	# Frame Begin
 	cmds.frameLayout( label='Normals', collapsable=True, collapse=win_frame_is_collapsed, bv=win_border_vis, mh=win_margin, mw=win_margin )
@@ -1810,8 +1921,15 @@ def makeUI():
 	btns_mode = [ 2, 1 ]
 	cmds.rowLayout( numberOfColumns=btns_mode[0]+1, adj=1, columnWidth=makeColWidth( btns_mode[0], btns_mode[1] ), columnAlign=col_align, columnAttach=makeColAttach( btns_mode[0], btns_mode[1] ) )
 	cmds.text( 'Sort Outliner' )
-	cmds.button( label='Selection', command='OnBtnSortOutliner( True, False )', annotation="Sorts the selected objects in the outliner by name."  )
-	cmds.button( label='Selection and Children', command='OnBtnSortOutliner( True, True )', annotation="Sorts the selected objects, and all children of the selected objects, in the outliner by name."  )
+	cmds.button( label='Selection', command='OnBtnSortOutliner( True, False, False )', annotation="Sorts the selected objects in the outliner by name."  )
+	cmds.button( label='Selection and Children', command='OnBtnSortOutliner( True, True, False )', annotation="Sorts the selected objects, and all children of the selected objects, in the outliner by name."  )
+	cmds.setParent( '..' )
+	# Buttons
+	btns_mode = [ 2, 1 ]
+	cmds.rowLayout( numberOfColumns=btns_mode[0]+1, adj=1, columnWidth=makeColWidth( btns_mode[0], btns_mode[1] ), columnAlign=col_align, columnAttach=makeColAttach( btns_mode[0], btns_mode[1] ) )
+	cmds.text( 'Reverse Sort Outliner' )
+	cmds.button( label='Selection', command='OnBtnSortOutliner( True, False, True )', annotation="Sorts the selected objects in the outliner by name."  )
+	cmds.button( label='Selection and Children', command='OnBtnSortOutliner( True, True, True )', annotation="Sorts the selected objects, and all children of the selected objects, in the outliner by name."  )
 	cmds.setParent( '..' )
 	# Frame End
 	cmds.text( label='', height=win_padding )
@@ -1870,6 +1988,33 @@ def makeUI():
 	cmds.rowLayout( numberOfColumns=btns_mode[0]+1, adj=1, columnWidth=makeColWidth( btns_mode[0], btns_mode[1] ), columnAlign=col_align, columnAttach=makeColAttach( btns_mode[0], btns_mode[1] ) )
 	cmds.text( '' )
 	cmds.button( label='Create and Assign Ramp Material', command=OnBtnAssignRampMat, annotation="Creates and assigns a lambert material with color ramp to the selected objects and uv links the ramp to uvSet[1]."  )
+	cmds.setParent( '..' )
+	# Frame End
+	cmds.text( label='', height=win_padding )
+	cmds.setParent( main_layout )
+	
+	# Frame Begin
+	cmds.frameLayout( label='Utility', collapsable=True, collapse=win_frame_is_collapsed, bv=win_border_vis, mh=win_margin, mw=win_margin )
+	cmds.text( '', height=( win_padding/2 ) )
+	cmds.columnLayout( adjustableColumn=True, columnAttach=('both', win_padding), columnOffset=('both', 0), rowSpacing=0 )
+	# Buttons
+	btns_mode = [ 1, 1 ]
+	cmds.rowLayout( numberOfColumns=btns_mode[0]+1, adj=1, columnWidth=makeColWidth( btns_mode[0], btns_mode[1] ), columnAlign=col_align, columnAttach=makeColAttach( btns_mode[0], btns_mode[1] ) )
+	cmds.text( '' )
+	cmds.button( label='Create Locators from Transforms', command=OnBtnLocatorsFromTransforms, annotation="Creates locators from the selected objects."  )
+	cmds.setParent( '..' )
+	# Slider
+	btns_mode = [ 1, 2 ]
+	cmds.rowLayout( numberOfColumns=btns_mode[0]+2, columnWidth=makeColWidth( btns_mode[0], btns_mode[1] ), columnAlign=col_align, adj=1, columnAttach=makeColAttach( btns_mode[0], btns_mode[1] ) )
+	cmds.text( 'Copy Alembic with Delay' )
+	cmds.intSliderGrp( 'alembic_copies_val', field=True, value=10, minValue=0, maxValue=100, fieldMinValue=-1.0e+06, fieldMaxValue=1.0e+06 )
+	cmds.button( label='Make N Copies', command='OnBtnCopyAlembicWithDelay( "True", cmds.intSliderGrp( "alembic_copies_val", q=True, v=True) )', annotation="Copies the selected object and alembic node 'n' times and gives each copy a different start time based on a user defined time offset value."  )
+	cmds.setParent( '..' )
+	# Buttons
+	btns_mode = [ 1, 1 ]
+	cmds.rowLayout( numberOfColumns=btns_mode[0]+1, adj=1, columnWidth=makeColWidth( btns_mode[0], btns_mode[1] ), columnAlign=col_align, columnAttach=makeColAttach( btns_mode[0], btns_mode[1] ) )
+	cmds.text( '' )
+	cmds.button( label='Batch Apply Transforms', command=OnBtnBatchApplyTransforms, annotation="The user selects two groups. The script moves the objects in the first group to the second and copies all transforms."  )
 	cmds.setParent( '..' )
 	# Frame End
 	cmds.text( label='', height=win_padding )
