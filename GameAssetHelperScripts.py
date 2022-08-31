@@ -249,6 +249,19 @@ def customRename( obj, name_base, sep, padding, index, first_index, mode ):
 	new_name = name_base + sep + suffix
 	cmds.rename( obj, new_name )
 
+def isGroup( obj ):
+	is_a_group = False
+	if cmds.nodeType( obj ) == "transform":
+		all_children = cmds.listRelatives( obj )
+		child_transforms = cmds.listRelatives( obj, type="transform" )
+		if not child_transforms:
+			child_transforms = list()
+	if len( all_children ) == len( child_transforms ):
+		is_a_group = True
+	else:
+		is_a_group = False
+	return is_a_group
+
 # Sort Outliner
 
 def getParentChildList( objs ):
@@ -1323,6 +1336,33 @@ def OnBtnAssignRampMat( isChecked ):
 		# link the uv set
 		cmds.uvLink( make=True, uvSet=( obj + ".uvSet[1].uvSetName" ), texture=ramp )
 
+def OnBtnGammaCorrectLambert( isChecked ):
+
+	# get the selected objects
+	sel = cmds.ls( selection=True, long=True, type="lambert" )
+	
+	# throw an error if nothing is selected
+	if (not sel):
+		cmds.confirmDialog( title='ERROR', message=('ERROR: Nothing selected.'), button=['OK'], defaultButton='OK' )
+		return -1
+	
+	gamma_val = 1 / 2.2
+
+	for obj in sel:
+		
+		col = cmds.getAttr( obj + ".color" )[0]
+		gamma_node = cmds.shadingNode( "gammaCorrect", asUtility=True )
+
+		cmds.setAttr( gamma_node + ".valueX", col[0] )
+		cmds.setAttr( gamma_node + ".valueY", col[1] )
+		cmds.setAttr( gamma_node + ".valueZ", col[2] )
+		
+		cmds.setAttr( gamma_node + ".gammaX", gamma_val )
+		cmds.setAttr( gamma_node + ".gammaY", gamma_val )
+		cmds.setAttr( gamma_node + ".gammaZ", gamma_val )
+		
+		cmds.connectAttr( gamma_node + ".outValue", obj + ".color" )
+
 # Vertex Color
 
 def OnBtnApplyVertColor( isChecked, mode, channel ):
@@ -1567,7 +1607,7 @@ def OnBtnCopyAlembicWithDelay( isChecked, num_instances ):
 	# make the expression
 	cmds.expression( s=expression_string, n=( obj_name + "_Expression" ), ae=1, uc="all" )
 
-def OnBtnBatchApplyTransforms( isChecked ):
+def OnBtnBatchApplyTransforms( isChecked, world_space ):
 
 	# get the selected objects
 	sel = cmds.ls( selection=True, long=True )
@@ -1577,15 +1617,29 @@ def OnBtnBatchApplyTransforms( isChecked ):
 		cmds.confirmDialog( title='ERROR', message=('ERROR: Nothing selected.'), button=['OK'], defaultButton='OK' )
 		return -1
 	
-	obj_grp = sel[0]
-	transform_grp = sel[1]
-
-	objs = cmds.listRelatives( obj_grp, f=True )
-	transforms = cmds.listRelatives( transform_grp, f=True )
-
+	src = sel[0]
+	dest = sel[1]
+	
+	objs = list()
+	transforms = list()
+	
+	if isGroup( src ) and isGroup( dest ):
+		obj_grp = src
+		transform_grp = dest
+		objs = cmds.listRelatives( obj_grp, f=True )
+		transforms = cmds.listRelatives( transform_grp, f=True )
+		
+	elif not isGroup( src ) and not isGroup( dest ):
+		objs.append( src )
+		transforms.append( dest )
+	
+	else:
+		cmds.confirmDialog( title='ERROR', message=('ERROR: Please select either a pair of groups or a pair of objects.'), button=['OK'], defaultButton='OK' )
+		return -1
+	
 	for i in range( len( objs ) ):
-		matrix = cmds.xform( transforms[i], m=True, query=True )
-		cmds.xform( objs[i], m=matrix )
+		matrix = cmds.xform( transforms[i], m=True, query=True, worldSpace=world_space )
+		cmds.xform( objs[i], m=matrix, worldSpace=world_space )
 
 
 ################################################################################
@@ -1868,6 +1922,13 @@ def makeUI():
 	cmds.button( label='Y Min', command=OnBtnCenterYMin, annotation="Moves the object to the world origin centered at the minimum y position."  )
 	cmds.button( label='Pole Y Min', command=OnBtnCenterPole, annotation="Moves the object to the world origin centered at the minimum y pole."  )
 	cmds.setParent( '..' )
+	# Buttons
+	btns_mode = [ 2, 1 ]
+	cmds.rowLayout( numberOfColumns=btns_mode[0]+1, adj=1, columnWidth=makeColWidth( btns_mode[0], btns_mode[1] ), columnAlign=col_align, columnAttach=makeColAttach( btns_mode[0], btns_mode[1] ) )
+	cmds.text( 'Copy Transforms' )
+	cmds.button( label='World Space', command='OnBtnBatchApplyTransforms( True, True )', annotation="The user selects two objects or groups. The script copies the transforms to the first selected object(s) in world space."  )
+	cmds.button( label='Local Space', command='OnBtnBatchApplyTransforms( True, False )', annotation="The user selects two objects or groups. The script copies the transforms to the first selected object(s) in local space."  )
+	cmds.setParent( '..' )
 	# Frame End
 	cmds.text( label='', height=win_padding )
 	cmds.setParent( main_layout )
@@ -1989,6 +2050,12 @@ def makeUI():
 	cmds.text( '' )
 	cmds.button( label='Create and Assign Ramp Material', command=OnBtnAssignRampMat, annotation="Creates and assigns a lambert material with color ramp to the selected objects and uv links the ramp to uvSet[1]."  )
 	cmds.setParent( '..' )
+	# Buttons
+	btns_mode = [ 1, 1 ]
+	cmds.rowLayout( numberOfColumns=btns_mode[0]+1, adj=1, columnWidth=makeColWidth( btns_mode[0], btns_mode[1] ), columnAlign=col_align, columnAttach=makeColAttach( btns_mode[0], btns_mode[1] ) )
+	cmds.text( '' )
+	cmds.button( label='Gamma Correct Lambert', command=OnBtnGammaCorrectLambert, annotation="Adds a gamma correction node with a value of 0.45 to the colour channel of the selected lambert materials."  )
+	cmds.setParent( '..' )
 	# Frame End
 	cmds.text( label='', height=win_padding )
 	cmds.setParent( main_layout )
@@ -2009,12 +2076,6 @@ def makeUI():
 	cmds.text( 'Copy Alembic with Delay' )
 	cmds.intSliderGrp( 'alembic_copies_val', field=True, value=10, minValue=0, maxValue=100, fieldMinValue=-1.0e+06, fieldMaxValue=1.0e+06 )
 	cmds.button( label='Make N Copies', command='OnBtnCopyAlembicWithDelay( "True", cmds.intSliderGrp( "alembic_copies_val", q=True, v=True) )', annotation="Copies the selected object and alembic node 'n' times and gives each copy a different start time based on a user defined time offset value."  )
-	cmds.setParent( '..' )
-	# Buttons
-	btns_mode = [ 1, 1 ]
-	cmds.rowLayout( numberOfColumns=btns_mode[0]+1, adj=1, columnWidth=makeColWidth( btns_mode[0], btns_mode[1] ), columnAlign=col_align, columnAttach=makeColAttach( btns_mode[0], btns_mode[1] ) )
-	cmds.text( '' )
-	cmds.button( label='Batch Apply Transforms', command=OnBtnBatchApplyTransforms, annotation="The user selects two groups. The script moves the objects in the first group to the second and copies all transforms."  )
 	cmds.setParent( '..' )
 	# Frame End
 	cmds.text( label='', height=win_padding )
