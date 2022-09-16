@@ -3,6 +3,7 @@ import maya.mel as mel
 import re
 import random as rand
 import math
+import maya.OpenMaya as om
 
 ################################################################################
 ## Functions
@@ -261,6 +262,29 @@ def isGroup( obj ):
 	else:
 		is_a_group = False
 	return is_a_group
+
+def worldSpaceToScreenSpace(cam_obj, worldPoint):
+
+	# get the dagPath to the camera shape node to get the world inverse matrix
+	selList = om.MSelectionList()
+	selList.add(cam_obj)
+	dagPath = om.MDagPath()
+	selList.getDagPath(0,dagPath)
+	dagPath.extendToShape()
+	camInvMtx = dagPath.inclusiveMatrix().inverse()
+
+	# use a camera function set to get projection matrix, convert the MFloatMatrix 
+	# into a MMatrix for multiplication compatibility
+	fnCam = om.MFnCamera(dagPath)
+	mFloatMtx = fnCam.projectionMatrix()
+	projMtx = om.MMatrix(mFloatMtx.matrix)
+
+	# multiply all together and do the normalisation
+	mPoint = om.MPoint(worldPoint[0],worldPoint[1],worldPoint[2]) * camInvMtx * projMtx;
+	x = (mPoint[0] / mPoint[3] / 2 + .5)
+	y = (mPoint[1] / mPoint[3] / 2 + .5)
+
+	return [x,y]
 
 # Sort Outliner
 
@@ -690,6 +714,120 @@ def onBtnScaleUvQuad( isChecked, uv_set ):
 		uvs = cmds.polyListComponentConversion( obj, toUV=True )
 		cmds.polyEditUV( uvs, pu=0, pv=0, su=length_ratio )
 	
+	cmds.select( sel )
+
+def OnBtnDeleteUV( isChecked ):
+	
+	# get the selected objects
+	sel = cmds.ls( selection=True, long=True )
+	
+	# throw an error if nothing is selected
+	if (not sel):
+		cmds.confirmDialog( title='ERROR', message=('ERROR: Nothing selected.'), button=['OK'], defaultButton='OK' )
+		return -1
+	
+	for obj in sel:
+		
+		# get the names of all uv sets
+		uv_sets = cmds.polyUVSet( obj, auv=True, query=True )
+		
+		# if there are no uv sets, create one
+		if len( uv_sets ) == 0:
+			cmds.polyUVSet( obj, create=True, uvSet="map1" )
+		
+		# otherwise, delete all uv sets except for the first and name it to map1
+		else:
+			
+			# get the first uv set
+			first_uv_set = uv_sets[0]
+			
+			# if there are additional uv sets, delete them
+			if len( uv_sets ) > 1:
+				uv_sets.pop( 0 )
+				for uv_set in uv_sets:
+					# delete the uv set
+					cmds.polyUVSet( obj, delete=True, uvSet=uv_set )
+			
+			# check if map1 exists
+			if first_uv_set != "map1":
+				# rename the first uv set to map1
+				cmds.polyUVSet( obj, rename=True, uvSet=first_uv_set, newUVSet="map1" )
+		
+		# set the current uv set
+		cmds.polyUVSet( obj, currentUVSet=True, uvSet="map1" )
+		
+		# delete the contents of map1
+		cmds.polyMapDel( obj )
+		
+		# delete construction history
+		cmds.delete( constructionHistory=True )
+
+	cmds.select( clear=True )
+
+def onBtnCameraProjectUV( isChecked, uv_set, projection_fill ):
+	
+	# get the selected objects
+	sel = cmds.ls( selection=True, long=True )
+	
+	# throw an error if nothing is selected
+	if (not sel):
+		cmds.confirmDialog( title='ERROR', message=('ERROR: Nothing selected.'), button=['OK'], defaultButton='OK' )
+		return -1
+	
+	cam = sel[-1]
+	objs = sel[:-1]
+
+	#projection_fill = 1 # 0=fill, 1=horizontal, 2=vertical
+	#uv_set = "map1"
+
+	res_width = float( cmds.getAttr('defaultResolution.width') )
+	res_height = float( cmds.getAttr('defaultResolution.height') )
+
+	# set the current uv set to work on
+	cmds.polyUVSet( objs, cuv=True, uvs=uv_set )
+
+	# make some basic uvs
+	for obj in objs:
+		cmds.polyPlanarProjection( obj, ch=True, ibd=True, md="z" )
+
+	# convert the objs to vertex
+	uvs = cmds.polyListComponentConversion( objs, toUV=True )
+	uvs = cmds.ls( uvs, flatten=True, l=True )
+
+	# move each uv
+	for uv in uvs:
+		# convert to vertex
+		vertex = cmds.polyListComponentConversion( uv, toVertex=True )
+		vertex = cmds.ls( vertex, flatten=True, l=True )[0]
+		# get world position
+		world_pos = cmds.xform( vertex, t=True, ws=True, query=True )
+		# convert to screenspace
+		uv_coord = worldSpaceToScreenSpace( cam, world_pos )
+		# edit the uv
+		cmds.polyEditUV( uv, r=False, uValue=uv_coord[0], vValue=uv_coord[1], uvs=uv_set )
+		# print progress
+		complete = round( ( float( uvs.index( uv ) ) + 1 ) / len( uvs ) * 100 )
+		print( "calculating: " + str( complete ) + "%..." )
+
+	# set scale values depending on fill method
+
+	# horizontal
+	if projection_fill == 1:
+		scale_u = 1
+		scale_v = res_height / res_width
+	# vertical
+	elif projection_fill ==2:
+		scale_u = res_width / res_height
+		scale_v = 1
+	# fill
+	else:
+		scale_u = 1
+		scale_v = 1
+
+	# adjust the overall scale of the uvs
+	cmds.polyEditUV( uvs, scaleU=scale_u, scaleV=scale_v, pivotU=0.5, pivotV=0.5, uvs=uv_set )
+
+	# reset the selection
 	cmds.select( sel )
 
 # Multi UV Set Workflow
@@ -1808,6 +1946,12 @@ def makeUI():
 	cmds.rowLayout( numberOfColumns=btns_mode[0]+1, adj=1, columnWidth=makeColWidth( btns_mode[0], btns_mode[1] ), columnAlign=col_align, columnAttach=makeColAttach( btns_mode[0], btns_mode[1] ) )
 	cmds.text( '' )
 	cmds.button( label='Scale UVs Proportionately Quad Mesh ( map1 )', command='onBtnScaleUvQuad( "True", "map1" )', annotation="Scales the UVs of the selected planar quad meshes in the U direction based on edge length ratio in the map1 set."  )
+	cmds.setParent( '..' )
+	# Buttons
+	btns_mode = [ 1, 1 ]
+	cmds.rowLayout( numberOfColumns=btns_mode[0]+1, adj=1, columnWidth=makeColWidth( btns_mode[0], btns_mode[1] ), columnAlign=col_align, columnAttach=makeColAttach( btns_mode[0], btns_mode[1] ) )
+	cmds.text( '' )
+	cmds.button( label='Camera Project UVs (map1)', command='onBtnCameraProjectUV( "True", "map1", 1 )', annotation="The script lays out the UVs on the selected objects based on the selected camera. The user selects the objects to UV first and the camera last." )
 	cmds.setParent( '..' )
 	# Buttons
 	btns_mode = [ 1, 1 ]
