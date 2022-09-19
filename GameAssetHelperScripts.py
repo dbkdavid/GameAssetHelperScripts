@@ -251,16 +251,13 @@ def customRename( obj, name_base, sep, padding, index, first_index, mode ):
 	cmds.rename( obj, new_name )
 
 def isGroup( obj ):
+
 	is_a_group = False
-	if cmds.nodeType( obj ) == "transform":
-		all_children = cmds.listRelatives( obj )
-		child_transforms = cmds.listRelatives( obj, type="transform" )
-		if not child_transforms:
-			child_transforms = list()
-	if len( all_children ) == len( child_transforms ):
+	
+	# the object is a group if it is a transform and it has no shape nodes
+	if ( ( cmds.objectType( obj, isType="transform" ) ) and	( not ( cmds.listRelatives( obj, shapes=True ) ) ) ):
 		is_a_group = True
-	else:
-		is_a_group = False
+	
 	return is_a_group
 
 def worldSpaceToScreenSpace(cam_obj, worldPoint):
@@ -680,40 +677,47 @@ def onBtnScaleUvQuad( isChecked, uv_set ):
 	for obj in sel:
 		corner_verts = getVertsWithEdgeCount( obj, 2 )
 		corner_edges = cmds.polyListComponentConversion( corner_verts[0], toEdge=True )
-		dimension_edges = list()
+		corner_edges = cmds.ls( corner_edges, long=True, flatten=True )
 		
+		# get a list for the edges in both dimensions from the corner
+		dimension_edges = list()
 		for e in corner_edges:
 			cmds.select( e )
 			cmds.polySelectConstraint( m2a=45, m3a=180, m=2, t=0x8000, pp=4 )
-			edges = cmds.ls( selection=True, flatten=True )
+			edge_list = cmds.ls( selection=True, flatten=True, long=True )
 			cmds.select( clear=True )
-			dimension_edges.append( edges )
+			dimension_edges.append( edge_list )
 		
+		'''
+		# determine the dimension with more edges
+		edges_for_length = list()
+		if len( dimension_edges[0] ) >= len( dimension_edges[1] ):
+			edges_for_length = dimension_edges[0]
+		else:
+			edges_for_length = dimension_edges[1]
+		'''
+		
+		# get the length of the edges
 		edge_lengths = list()
-		
 		for e_list in dimension_edges:
 			edge_lengths.append( getEdgeLengthSum( e_list ) )
+			
+		#print( edge_lengths[0] )
+		#print( edge_lengths[1] )
+		
+		# unitize the UVs
+		cmds.select( obj )
+		OnBtnUnitizeUVPlanar( True, uv_set )
 		
 		a = edge_lengths[0] / edge_lengths[1]
 		b = edge_lengths[1] / edge_lengths[0]
-		
-		length_ratio = 1
-		
-		'''
-		if a < b:
-			length_ratio = a
-		else:
-			length_ratio = b
-		
-		print( length_ratio )
-		'''
 		
 		length_ratio = a
 		
 		cmds.polyUVSet( obj, uvs=uv_set, cuv=True )
 		uvs = cmds.polyListComponentConversion( obj, toUV=True )
 		cmds.polyEditUV( uvs, pu=0, pv=0, su=length_ratio )
-	
+		
 	cmds.select( sel )
 
 def OnBtnDeleteUV( isChecked ):
@@ -829,6 +833,66 @@ def onBtnCameraProjectUV( isChecked, uv_set, projection_fill ):
 
 	# reset the selection
 	cmds.select( sel )
+
+def onBtnFitUVsToDimension( isChecked, scale_dimension ):
+
+	# Scales and lays out the uvs on the selected objects to fit the zero to one uv space in the given dimension.
+
+	sel = cmds.ls( selection=True, long=True )
+	
+	# throw an error if nothing is selected
+	if (not sel):
+		cmds.confirmDialog( title='ERROR', message=('ERROR: Nothing selected.'), button=['OK'], defaultButton='OK' )
+		return -1
+
+	#scale_dimension = "u"
+
+	for obj in sel:
+
+		# convert the selection to uvs
+		sel_uv = cmds.polyListComponentConversion( obj, toUV=True )
+		sel_uv = cmds.ls( sel_uv, long=True, flatten=True )
+
+		# make a list to store the uv name and values
+		uv_name_val = list()
+		for uv in sel_uv:
+			new_entry = list()
+			uv_value = cmds.polyEditUV( uv, query=True )
+			new_entry.append( uv )
+			new_entry.append( uv_value[0] )
+			new_entry.append( uv_value[1] )
+			uv_name_val.append( new_entry )
+		
+		for elem in uv_name_val:
+			print( elem )
+		
+		# from the user input, get the array element
+		if scale_dimension == "u":
+			elem_for_scale = 1
+		else:
+			elem_for_scale = 2
+
+		# get the dimension
+		uv_name_val.sort( key=lambda x: float(x[elem_for_scale]) )
+		dimension = abs( uv_name_val[-1][elem_for_scale] - uv_name_val[0][elem_for_scale] )
+
+		# get the min uv
+		uv_name_val.sort( key=lambda x: float(x[1]) )
+		min_u_val = uv_name_val[0][1]
+		uv_name_min_u = list()
+		for elem in uv_name_val:
+			if elem[1] <= min_u_val:
+				uv_name_min_u.append( elem )
+		uv_name_min_u.sort( key=lambda x: float(x[2]) )
+		min_uv_name = uv_name_min_u[0][0]
+
+		# scale the uvs
+		v_scale = 1 / dimension
+		cmds.polyEditUV( sel_uv, su=v_scale, sv=v_scale )
+
+		# reposition the uvs at the origin
+		min_uv_val = cmds.polyEditUV( min_uv_name, query=True )
+		cmds.polyEditUV( sel_uv, u=0-min_uv_val[0], v=0-min_uv_val[1] )
 
 # Multi UV Set Workflow
 
@@ -1426,6 +1490,53 @@ def OnBtnResetTransform( isChecked, mode ):
 			if mode == "scale":
 				cmds.xform( obj, s=[ 1, 1, 1 ], ws=True )
 
+def OnBtnCopyTransforms( isChecked, world_space, mode ):
+
+	# get the selected objects
+	sel = cmds.ls( selection=True, long=True, type="transform" )
+	
+	#world_space = True
+	#mode = 2
+	
+	# obj > obj
+	if mode == 1:
+		
+		# check if at least two transforms are selected
+		if (not sel) or ( len( sel ) < 2 ):
+			cmds.confirmDialog( title='ERROR', message=('ERROR: Please select two or more transforms.'), button=['OK'], defaultButton='OK' )
+			return -1
+		
+		src = sel[:-1]
+		dest = [ sel[-1] ]
+		
+		matrix = cmds.xform( dest, m=True, query=True, worldSpace=world_space )
+		for obj in src:
+			cmds.xform( obj, m=matrix, worldSpace=world_space )
+	
+	# grp > grp
+	if mode == 2:
+
+		# check if two transforms are selected
+		if (not sel) or ( len( sel ) != 2 ):
+			cmds.confirmDialog( title='ERROR', message=('ERROR: Please select two groups.'), button=['OK'], defaultButton='OK' )
+			return -1
+		
+		src = sel[0]
+		dest = sel[1]
+		
+		# check if the two transforms are groups
+		if ( not isGroup( src ) ) or ( not isGroup( dest ) ):
+			cmds.confirmDialog( title='ERROR', message=('ERROR: Please select two groups.'), button=['OK'], defaultButton='OK' )
+			return -1
+		
+		src_children = cmds.listRelatives( src, f=True, type="transform" )
+		dest_children = cmds.listRelatives( dest, f=True, type="transform" )
+		min_children = min( len( src_children ), len( dest_children ) )
+		
+		for i in range( min_children ):
+			matrix = cmds.xform( dest_children[i], m=True, query=True, worldSpace=world_space )
+			cmds.xform( src_children[i], m=matrix, worldSpace=world_space )
+
 # Outliner
 
 def OnBtnSortOutliner( isChecked, recursive, reverse ):
@@ -1474,7 +1585,7 @@ def OnBtnAssignRampMat( isChecked ):
 		# link the uv set
 		cmds.uvLink( make=True, uvSet=( obj + ".uvSet[1].uvSetName" ), texture=ramp )
 
-def OnBtnGammaCorrectLambert( isChecked ):
+def OnBtnAddGammaNode( isChecked, gamma_val ):
 
 	# get the selected objects
 	sel = cmds.ls( selection=True, long=True, type="lambert" )
@@ -1484,7 +1595,7 @@ def OnBtnGammaCorrectLambert( isChecked ):
 		cmds.confirmDialog( title='ERROR', message=('ERROR: Nothing selected.'), button=['OK'], defaultButton='OK' )
 		return -1
 	
-	gamma_val = 1 / 2.2
+	#gamma_val = 1 / 2.2
 
 	for obj in sel:
 		
@@ -1500,6 +1611,28 @@ def OnBtnGammaCorrectLambert( isChecked ):
 		cmds.setAttr( gamma_node + ".gammaZ", gamma_val )
 		
 		cmds.connectAttr( gamma_node + ".outValue", obj + ".color" )
+
+def OnBtnGammaCorrectLambert( isChecked, gamma ):
+
+	# get the selected objects
+	sel = cmds.ls( selection=True, long=True, type="lambert" )
+	
+	# throw an error if nothing is selected
+	if (not sel):
+		cmds.confirmDialog( title='ERROR', message=('ERROR: Nothing selected.'), button=['OK'], defaultButton='OK' )
+		return -1
+
+	for lamb in sel:
+
+		new_color = list()
+		original_color = cmds.getAttr( lamb + ".color" )[0]
+
+		for channel in original_color:
+			new_color.append( pow( channel, gamma ) )
+		
+		cmds.setAttr( lamb + ".colorR", new_color[0] )
+		cmds.setAttr( lamb + ".colorG", new_color[1] )
+		cmds.setAttr( lamb + ".colorB", new_color[2] )
 
 # Vertex Color
 
@@ -1745,41 +1878,6 @@ def OnBtnCopyAlembicWithDelay( isChecked, num_instances ):
 	# make the expression
 	cmds.expression( s=expression_string, n=( obj_name + "_Expression" ), ae=1, uc="all" )
 
-def OnBtnBatchApplyTransforms( isChecked, world_space ):
-
-	# get the selected objects
-	sel = cmds.ls( selection=True, long=True )
-	
-	# throw an error if nothing is selected
-	if (not sel):
-		cmds.confirmDialog( title='ERROR', message=('ERROR: Nothing selected.'), button=['OK'], defaultButton='OK' )
-		return -1
-	
-	src = sel[0]
-	dest = sel[1]
-	
-	objs = list()
-	transforms = list()
-	
-	if isGroup( src ) and isGroup( dest ):
-		obj_grp = src
-		transform_grp = dest
-		objs = cmds.listRelatives( obj_grp, f=True )
-		transforms = cmds.listRelatives( transform_grp, f=True )
-		
-	elif not isGroup( src ) and not isGroup( dest ):
-		objs.append( src )
-		transforms.append( dest )
-	
-	else:
-		cmds.confirmDialog( title='ERROR', message=('ERROR: Please select either a pair of groups or a pair of objects.'), button=['OK'], defaultButton='OK' )
-		return -1
-	
-	for i in range( len( objs ) ):
-		matrix = cmds.xform( transforms[i], m=True, query=True, worldSpace=world_space )
-		cmds.xform( objs[i], m=matrix, worldSpace=world_space )
-
-
 ################################################################################
 ## User Interface
 ################################################################################
@@ -1945,7 +2043,14 @@ def makeUI():
 	btns_mode = [ 1, 1 ]
 	cmds.rowLayout( numberOfColumns=btns_mode[0]+1, adj=1, columnWidth=makeColWidth( btns_mode[0], btns_mode[1] ), columnAlign=col_align, columnAttach=makeColAttach( btns_mode[0], btns_mode[1] ) )
 	cmds.text( '' )
-	cmds.button( label='Scale UVs Proportionately Quad Mesh ( map1 )', command='onBtnScaleUvQuad( "True", "map1" )', annotation="Scales the UVs of the selected planar quad meshes in the U direction based on edge length ratio in the map1 set."  )
+	cmds.button( label='Layout Using Edge Length Ratio Quad Mesh ( map1 )', command='onBtnScaleUvQuad( "True", "map1" )', annotation="Unitizes the selected planar quad meshes in the map1 set and scales them in the U direction based on edge length ratio."  )
+	cmds.setParent( '..' )
+	# Buttons
+	btns_mode = [ 2, 1 ]
+	cmds.rowLayout( numberOfColumns=btns_mode[0]+1, adj=1, columnWidth=makeColWidth( btns_mode[0], btns_mode[1] ), columnAlign=col_align, columnAttach=makeColAttach( btns_mode[0], btns_mode[1] ) )
+	cmds.text( 'Fit UVs to Grid' )
+	cmds.button( label='U', command='onBtnFitUVsToDimension( True, "u" )', annotation="The script scales and lays out the uvs on the selected objects to fit the zero to one uv space in the given dimension." )
+	cmds.button( label='V', command='onBtnFitUVsToDimension( True, "v" )', annotation="The script scales and lays out the uvs on the selected objects to fit the zero to one uv space in the given dimension." )
 	cmds.setParent( '..' )
 	# Buttons
 	btns_mode = [ 1, 1 ]
@@ -2069,9 +2174,16 @@ def makeUI():
 	# Buttons
 	btns_mode = [ 2, 1 ]
 	cmds.rowLayout( numberOfColumns=btns_mode[0]+1, adj=1, columnWidth=makeColWidth( btns_mode[0], btns_mode[1] ), columnAlign=col_align, columnAttach=makeColAttach( btns_mode[0], btns_mode[1] ) )
-	cmds.text( 'Copy Transforms' )
-	cmds.button( label='World Space', command='OnBtnBatchApplyTransforms( True, True )', annotation="The user selects two objects or groups. The script copies the transforms to the first selected object(s) in world space."  )
-	cmds.button( label='Local Space', command='OnBtnBatchApplyTransforms( True, False )', annotation="The user selects two objects or groups. The script copies the transforms to the first selected object(s) in local space."  )
+	cmds.text( 'Copy Transforms (Objects)' )
+	cmds.button( label='World Space', command='OnBtnCopyTransforms( True, True, 1 )', annotation="The user selects two objects. The script sets the transforms on the first object(s) based on the last object."  )
+	cmds.button( label='Local Space', command='OnBtnCopyTransforms( True, False, 1 )', annotation="The user selects two objects. The script sets the transforms on the first object(s) based on the last object."  )
+	cmds.setParent( '..' )
+	# Buttons
+	btns_mode = [ 2, 1 ]
+	cmds.rowLayout( numberOfColumns=btns_mode[0]+1, adj=1, columnWidth=makeColWidth( btns_mode[0], btns_mode[1] ), columnAlign=col_align, columnAttach=makeColAttach( btns_mode[0], btns_mode[1] ) )
+	cmds.text( 'Copy Transforms (Groups)' )
+	cmds.button( label='World Space', command='OnBtnCopyTransforms( True, True, 2 )', annotation="The user selects two groups. The script sets the transforms on the objects in the first group based on the second."  )
+	cmds.button( label='Local Space', command='OnBtnCopyTransforms( True, False, 2 )', annotation="The user selects two groups. The script sets the transforms on the objects in the first group based on the second."  )
 	cmds.setParent( '..' )
 	# Frame End
 	cmds.text( label='', height=win_padding )
@@ -2195,10 +2307,18 @@ def makeUI():
 	cmds.button( label='Create and Assign Ramp Material', command=OnBtnAssignRampMat, annotation="Creates and assigns a lambert material with color ramp to the selected objects and uv links the ramp to uvSet[1]."  )
 	cmds.setParent( '..' )
 	# Buttons
-	btns_mode = [ 1, 1 ]
+	btns_mode = [ 2, 1 ]
 	cmds.rowLayout( numberOfColumns=btns_mode[0]+1, adj=1, columnWidth=makeColWidth( btns_mode[0], btns_mode[1] ), columnAlign=col_align, columnAttach=makeColAttach( btns_mode[0], btns_mode[1] ) )
-	cmds.text( '' )
-	cmds.button( label='Gamma Correct Lambert', command=OnBtnGammaCorrectLambert, annotation="Adds a gamma correction node with a value of 0.45 to the colour channel of the selected lambert materials."  )
+	cmds.text( 'Add Gamma Node' )
+	cmds.button( label='0.45', command='OnBtnAddGammaNode( "True", 1 / 2.2 )', annotation="Adds a gamma correction node to the colour channel of the selected lambert materials."  )
+	cmds.button( label='2.2', command='OnBtnAddGammaNode( "True", 2.2 )', annotation="Adds a gamma correction node to the colour channel of the selected lambert materials."  )
+	cmds.setParent( '..' )
+	# Buttons
+	btns_mode = [ 2, 1 ]
+	cmds.rowLayout( numberOfColumns=btns_mode[0]+1, adj=1, columnWidth=makeColWidth( btns_mode[0], btns_mode[1] ), columnAlign=col_align, columnAttach=makeColAttach( btns_mode[0], btns_mode[1] ) )
+	cmds.text( 'Gamma Correct Lambert' )
+	cmds.button( label='0.45', command='OnBtnGammaCorrectLambert( "True", 1 / 2.2 )', annotation="Gamma corrects the color channel of the selected lambert materials."  )
+	cmds.button( label='2.2', command='OnBtnGammaCorrectLambert( "True", 2.2 )', annotation="Gamma corrects the color channel of the selected lambert materials."  )
 	cmds.setParent( '..' )
 	# Frame End
 	cmds.text( label='', height=win_padding )
