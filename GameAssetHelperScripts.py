@@ -283,6 +283,58 @@ def worldSpaceToScreenSpace(cam_obj, worldPoint):
 
 	return [x,y]
 
+def getConnectedEdges( edge_list ):
+	
+	# The function takes a list of edges and returns a list of edge groups.
+	# Each group contains edges that are connected.
+	
+	edge_groups = list()
+	initial_edges = set( edge_list )
+	max_iter = 100
+
+	j = 1
+	while j > 0 and j < max_iter:
+		
+		# make a set to hold the chosen edges
+		chosen_edges = set()
+		chosen_edges.add( next( iter( initial_edges ) ) )	
+		
+		i = 1
+		while i > 0 and i < max_iter:
+			
+			# expand the selection
+			expanded_verts = cmds.polyListComponentConversion( chosen_edges, toVertex=True )
+			expanded_edges = cmds.polyListComponentConversion( expanded_verts, toEdge=True )
+			
+			# flatten the list and convert to a set
+			expanded_edges = set( cmds.ls( expanded_edges, long=True, flatten=True ) )
+			
+			# remove the chosen edges from the set
+			expanded_edges = expanded_edges.difference( chosen_edges )
+			
+			# get the edges in the expansion contained in the initial list
+			found_edges = expanded_edges.intersection( initial_edges )
+			
+			# if: the expanded selection contains edges from the initial list
+			if ( found_edges ):
+				chosen_edges = chosen_edges.union( found_edges )
+				i += 1
+			else:
+				i = 0
+	
+		# add the chosen edges to the group list
+		edge_groups.append( list( chosen_edges ) )
+		
+		# remove the chosen edges from the initial edges
+		initial_edges = initial_edges.difference( chosen_edges )
+		
+		if ( initial_edges ):
+			j += 1
+		else:
+			j = 0
+	
+	return edge_groups
+
 # Sort Outliner
 
 def getParentChildList( objs ):
@@ -528,6 +580,8 @@ def OnBtnFixNormals( isChecked ):
 		#cmds.polySoftEdge( obj, a=60, ch=0 )
 		cmds.polySoftEdge( obj, a=180 )
 		cmds.select( clear=True )
+	
+	cmds.select( sel )
 
 # Topology
 
@@ -1172,7 +1226,12 @@ def OnBtnUnitizeUVPolar( isChecked, uvset_name ):
 
 # PaintFX
 
-def onBtnPaintFXMergeAndCloseHoles( isChecked ):
+def onBtnPaintFXCloseHolesAndBevel( isChecked ):
+	
+	# The function finds open holes on the mesh, fills them, and bevels the edge around the hole
+	# It then tries to merge the vertices on the filled hole.
+	# Note: the merge vertex operation uses ngons to detect the filled hole.
+	# This may lead it issues if the mesh already contains ngons.
 	
 	# get the selected objects
 	sel = cmds.ls( selection=True, long=True )
@@ -1182,15 +1241,71 @@ def onBtnPaintFXMergeAndCloseHoles( isChecked ):
 		cmds.confirmDialog( title='ERROR', message=('ERROR: Nothing selected.'), button=['OK'], defaultButton='OK' )
 		return -1
 
+	bevel_fraction = 0.7
+	bevel_segments = 3
+	bevel_merge = 0.0001
+
 	for obj in sel:
-		# merge vertex
-		cmds.polyMergeVertex( obj, d=0.0001, am=1, ch=1 )
-		# get the perimeter edges
-		faces = cmds.polyListComponentConversion( obj, toFace=True )
-		edges_perimeter = cmds.polyListComponentConversion( faces, toEdge=True, bo=True )
-		# merge to center
-		cmds.polyMergeVertex( edges_perimeter, d=100000, ch=1, am=True )
+
+		# convert object to edges
+		edges = cmds.polyListComponentConversion( obj, toEdge=True )
+		edges = cmds.ls( edges, long=True, flatten=True )
 		
+		# get the open edges
+		cmds.select( edges )
+		cmds.polySelectConstraint( pp=3, type=0x8000 )
+		border_edges = cmds.ls( selection=True, long=True, flatten=True )
+		
+		k = 1
+		while k > 0 and border_edges and k < 10:
+			
+			connected_edges = getConnectedEdges( border_edges )
+			
+			# fill holes
+			cmds.polyCloseBorder( connected_edges[0], ch=1 )
+			
+			# bevel
+			cmds.polyBevel3(
+				connected_edges[0],
+				fraction=bevel_fraction,
+				offsetAsFraction=1,
+				autoFit=1,
+				depth=1,
+				mitering=0,
+				miterAlong=0,
+				chamfer=1,
+				segments=bevel_segments,
+				worldSpace=0,
+				smoothingAngle=60,
+				subdivideNgons=1,
+				mergeVertices=1,
+				mergeVertexTolerance=bevel_merge, #0.0001,
+				miteringAngle=180,
+				angleTolerance=180,
+				ch=1
+			)
+			
+			# merge verts on ngons
+			cmds.select( obj )
+			mel.eval('polyCleanupArgList 4 { "0","2","1","0","1","0","0","0","0","1e-05","0","1e-05","0","1e-05","0","-1","0","0" };')
+			ngon_faces = cmds.ls( selection=True, long=True, flatten=True )
+			if ngon_faces:
+				cmds.polyMergeVertex( ngon_faces[0], d=100 )
+			
+			# convert object to edges
+			edges = cmds.polyListComponentConversion( obj, toEdge=True )
+			edges = cmds.ls( edges, long=True, flatten=True )
+			
+			# get the open edges
+			cmds.select( edges )
+			cmds.polySelectConstraint( pp=3, type=0x8000 )
+			border_edges = cmds.ls( selection=True, long=True, flatten=True )
+			
+			if border_edges:
+				k += 1
+			else:
+				k = 0
+	
 	cmds.select( sel )
 
 def onBtnPaintFXToPoly( isChecked ):
@@ -2021,7 +2136,7 @@ def makeUI():
 	btns_mode = [ 1, 1 ]
 	cmds.rowLayout( numberOfColumns=btns_mode[0]+1, adj=1, columnWidth=makeColWidth( btns_mode[0], btns_mode[1] ), columnAlign=col_align, columnAttach=makeColAttach( btns_mode[0], btns_mode[1] ) )
 	cmds.text( '' )
-	cmds.button( label='Merge Vertices and Close Holes', command=onBtnPaintFXMergeAndCloseHoles, annotation="Merges vertices and closes holes on PaintFX strokes."  )
+	cmds.button( label='Close Holes and Bevel', command=onBtnPaintFXCloseHolesAndBevel, annotation="Closes holes, bevels the edge around the hole, and merges vertices on the selected meshes."  )
 	cmds.setParent( '..' )
 	# Frame End
 	cmds.text( label='', height=win_padding )
