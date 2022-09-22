@@ -1749,6 +1749,26 @@ def OnBtnGammaCorrectLambert( isChecked, gamma ):
 		cmds.setAttr( lamb + ".colorG", new_color[1] )
 		cmds.setAttr( lamb + ".colorB", new_color[2] )
 
+def OnBtnAssignMatFromSel( isChecked ):
+
+	# get the selected objects
+	sel = cmds.ls( selection=True, dag=True, s=True, long=True )
+	
+	# throw an error if nothing is selected
+	if (not sel):
+		cmds.confirmDialog( title='ERROR', message=('ERROR: Nothing selected.'), button=['OK'], defaultButton='OK' )
+		return -1
+	
+	objs = sel[:-1]
+	obj_mat = sel[-1]
+	
+	shading_engine = cmds.listConnections( obj_mat, type="shadingEngine" )[0]
+	#materials = cmds.ls( cmds.listConnections( shading_engine ), materials=True)
+
+	for obj in objs:
+		cmds.sets( obj, e=True, forceElement=shading_engine )
+
+
 # Vertex Color
 
 def OnBtnApplyVertColor( isChecked, mode, channel ):
@@ -2434,6 +2454,12 @@ def makeUI():
 	cmds.text( 'Gamma Correct Lambert' )
 	cmds.button( label='0.45', command='OnBtnGammaCorrectLambert( "True", 1 / 2.2 )', annotation="Gamma corrects the color channel of the selected lambert materials."  )
 	cmds.button( label='2.2', command='OnBtnGammaCorrectLambert( "True", 2.2 )', annotation="Gamma corrects the color channel of the selected lambert materials."  )
+	cmds.setParent( '..' )
+	# Buttons
+	btns_mode = [ 1, 1 ]
+	cmds.rowLayout( numberOfColumns=btns_mode[0]+1, adj=1, columnWidth=makeColWidth( btns_mode[0], btns_mode[1] ), columnAlign=col_align, columnAttach=makeColAttach( btns_mode[0], btns_mode[1] ) )
+	cmds.text( '' )
+	cmds.button( label='Assign Material From Selection', command=OnBtnAssignMatFromSel, annotation="The script gets the material from the last selected object and assigns it to the first selected object(s)."  )
 	cmds.setParent( '..' )
 	# Frame End
 	cmds.text( label='', height=win_padding )
