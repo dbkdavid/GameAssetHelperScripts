@@ -1759,15 +1759,14 @@ def OnBtnAssignMatFromSel( isChecked ):
 		cmds.confirmDialog( title='ERROR', message=('ERROR: Nothing selected.'), button=['OK'], defaultButton='OK' )
 		return -1
 	
-	objs = sel[:-1]
-	obj_mat = sel[-1]
+	obj_mat = sel[0]
+	objs = sel[1:]
 	
 	shading_engine = cmds.listConnections( obj_mat, type="shadingEngine" )[0]
 	#materials = cmds.ls( cmds.listConnections( shading_engine ), materials=True)
 
 	for obj in objs:
 		cmds.sets( obj, e=True, forceElement=shading_engine )
-
 
 # Vertex Color
 
@@ -1822,6 +1821,30 @@ def OnBtnApplyVertColor( isChecked, mode, channel ):
 			result_color = multVectorByScalar( values[i], vertex_color )
 			#print( result_color )
 			cmds.polyColorPerVertex( verts[i], rgb=result_color, rel=additive, cdo=True )
+
+def OnBtnApplyVertColorFromLambert( isChecked ):
+	
+	# get the selected objects
+	sel = cmds.ls( selection=True, dag=True, s=True, long=True )
+	
+	# throw an error if nothing is selected
+	if (not sel):
+		cmds.confirmDialog( title='ERROR', message=('ERROR: Nothing selected.'), button=['OK'], defaultButton='OK' )
+		return -1
+		
+	for obj in sel:
+		
+		# get the shading engine on the object
+		shading_engine = cmds.listConnections( obj, type="shadingEngine" )[0]
+		# get the lambert
+		material = cmds.ls( cmds.listConnections( shading_engine ), type="lambert" )[0]
+		# get the color
+		mat_color = cmds.getAttr( material + ".color" )[0]
+		# apply vertex color
+		cmds.polyColorPerVertex( obj, r=mat_color[0], g=mat_color[1], b=mat_color[2], a=1.0, cdo=True )
+		# print progress
+		complete = round( ( float( sel.index( obj ) ) + 1 ) / len( sel ) * 100 )
+		print( "calculating: " + str( complete ) + "%..." )
 
 # Rename
 
@@ -1881,7 +1904,7 @@ def OnBtnCustomRename( isChecked, input_str, mode ):
 	
 	for obj in sel:
 	
-		obj_name = cmds.ls( obj, long=False )[0]
+		obj_name = obj.split("|")[-1]
 	
 		if mode=="Add Suffix":
 			cmds.rename( obj, obj_name + input_str )
@@ -2426,6 +2449,12 @@ def makeUI():
 	cmds.text( 'Apply Color' )
 	cmds.button( label='Set to Black', command='OnBtnApplyVertColor( "True", "clear", "r" )', annotation="Sets the vertex colors to black."  )
 	cmds.button( label='V Coord -> R', command='OnBtnApplyVertColor( "True", "uv_v", "r" )', annotation="Sets vertex colors based on V coordinates. Uses additive color blending in the R channel."  )
+	cmds.setParent( '..' )
+	# Buttons
+	btns_mode = [ 1, 1 ]
+	cmds.rowLayout( numberOfColumns=btns_mode[0]+1, adj=1, columnWidth=makeColWidth( btns_mode[0], btns_mode[1] ), columnAlign=col_align, columnAttach=makeColAttach( btns_mode[0], btns_mode[1] ) )
+	cmds.text( '' )
+	cmds.button( label='Apply Color From Lambert', command=OnBtnApplyVertColorFromLambert, annotation="Sets the vertex color on the selected objects to the lambert color."  )
 	cmds.setParent( '..' )
 	# Frame End
 	cmds.text( label='', height=win_padding )
