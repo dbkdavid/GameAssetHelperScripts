@@ -1666,6 +1666,42 @@ def OnBtnSortOutliner( isChecked, recursive, reverse ):
 	
 	sortOutliner( sel, recursive, reverse )
 
+def OnBtnMakeNullAboveSelected( isChecked ):
+
+	# get the selected objects
+	sel = cmds.ls( selection=True, long=True )
+	
+	# throw an error if nothing is selected
+	if (not sel):
+		cmds.confirmDialog( title='ERROR', message=('ERROR: Nothing selected.'), button=['OK'], defaultButton='OK' )
+		return -1
+	
+	# get the object
+	obj = sel[0]
+	
+	# get the parent and get the children at the same level
+	obj_short_name = obj.split('|')[-1]
+	obj_parent = cmds.listRelatives( obj, parent=True, f=True )
+	sort_group = cmds.listRelatives( obj_parent, c=True )
+
+	# get the index of the selected object in the hierarchy
+	obj_index = 0
+	for c in sort_group:
+		if c == obj_short_name:
+			obj_index = sort_group.index(c)
+
+	# make a new group and parent it to the object's group
+	new_group = cmds.group( em=True )
+	cmds.parent( new_group, obj_parent )
+
+	# move the group to the top of the list
+	cmds.reorder( new_group, front=True )
+
+	# move all of the other objects above the group
+	for i in range( obj_index ):
+		k = obj_index - 1 - i
+		cmds.reorder( sort_group[k], front=True )
+
 # Materials
 
 def OnBtnAssignRampMat( isChecked ):
@@ -2405,6 +2441,12 @@ def makeUI():
 	cmds.text( 'Reverse Sort Outliner' )
 	cmds.button( label='Selection', command='OnBtnSortOutliner( True, False, True )', annotation="Sorts the selected objects in the outliner by name."  )
 	cmds.button( label='Selection and Children', command='OnBtnSortOutliner( True, True, True )', annotation="Sorts the selected objects, and all children of the selected objects, in the outliner by name."  )
+	cmds.setParent( '..' )
+	# Buttons
+	btns_mode = [ 1, 1 ]
+	cmds.rowLayout( numberOfColumns=btns_mode[0]+1, adj=1, columnWidth=makeColWidth( btns_mode[0], btns_mode[1] ), columnAlign=col_align, columnAttach=makeColAttach( btns_mode[0], btns_mode[1] ) )
+	cmds.text( '' )
+	cmds.button( label='Make Null Above Selected', command='OnBtnMakeNullAboveSelected( True )', annotation="Makes a new null object and inserts it above the selected object in the outliner."  )
 	cmds.setParent( '..' )
 	# Frame End
 	cmds.text( label='', height=win_padding )
